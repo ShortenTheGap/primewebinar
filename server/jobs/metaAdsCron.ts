@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import { supabase } from '../lib/supabase.js';
+import { query } from '../lib/db.js';
 
 interface MetaInsight {
   campaign_id: string;
@@ -57,27 +57,36 @@ export function startMetaAdsCron(): void {
         return;
       }
 
-      const rows = insights.map((row) => ({
-        date: row.date_start,
-        campaign_id: row.campaign_id,
-        campaign_name: row.campaign_name,
-        adset_id: row.adset_id,
-        ad_id: row.ad_id || null,
-        impressions: parseInt(row.impressions, 10) || 0,
-        clicks: parseInt(row.clicks, 10) || 0,
-        spend: parseFloat(row.spend) || 0,
-        reach: parseInt(row.reach, 10) || 0,
-      }));
-
-      const { error } = await supabase
-        .from('ad_spend')
-        .upsert(rows, { onConflict: 'date,campaign_id' });
-
-      if (error) {
-        console.error('Error upserting ad_spend:', error);
-      } else {
-        console.log(`Meta Ads sync complete: ${rows.length} rows upserted for ${dateStr}`);
+      let upserted = 0;
+      for (const row of insights) {
+        await query(
+          `INSERT INTO ad_spend (date, campaign_id, campaign_name, adset_id, creative_id, impressions, clicks, spend, reach, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+           ON CONFLICT (date, campaign_id) DO UPDATE SET
+             campaign_name = EXCLUDED.campaign_name,
+             adset_id = EXCLUDED.adset_id,
+             creative_id = EXCLUDED.creative_id,
+             impressions = EXCLUDED.impressions,
+             clicks = EXCLUDED.clicks,
+             spend = EXCLUDED.spend,
+             reach = EXCLUDED.reach,
+             updated_at = NOW()`,
+          [
+            row.date_start,
+            row.campaign_id,
+            row.campaign_name,
+            row.adset_id,
+            row.ad_id || null,
+            parseInt(row.impressions, 10) || 0,
+            parseInt(row.clicks, 10) || 0,
+            parseFloat(row.spend) || 0,
+            parseInt(row.reach, 10) || 0,
+          ],
+        );
+        upserted++;
       }
+
+      console.log(`Meta Ads sync complete: ${upserted} rows upserted for ${dateStr}`);
     } catch (err) {
       console.error('Meta Ads cron job failed:', err);
     }

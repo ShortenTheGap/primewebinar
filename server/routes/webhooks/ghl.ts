@@ -1,15 +1,20 @@
 import { Router, type Request, type Response } from 'express';
 import crypto from 'crypto';
-import { supabase } from '../../lib/supabase.js';
+import { query } from '../../lib/db.js';
 
 const router = Router();
 
 function verifySignature(payload: string, signature: string): boolean {
   const secret = process.env.GHL_WEBHOOK_SECRET || '';
+  if (!secret) return false;
   const hmac = crypto.createHmac('sha256', secret);
   hmac.update(payload);
   const digest = hmac.digest('hex');
-  return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(signature));
+  try {
+    return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(signature));
+  } catch {
+    return false;
+  }
 }
 
 router.post('/', (req: Request, res: Response) => {
@@ -33,21 +38,20 @@ router.post('/', (req: Request, res: Response) => {
 async function processEvent(event: string, body: Record<string, any>): Promise<void> {
   switch (event) {
     case 'contact.created': {
-      const { email, utm_source, utm_campaign, utm_content, utm_medium, referral_partner, workshop_cohort } = body;
-      await supabase
-        .from('contacts')
-        .upsert(
-          {
-            email,
-            lead_source: utm_source || null,
-            utm_campaign: utm_campaign || null,
-            utm_content: utm_content || null,
-            utm_medium: utm_medium || null,
-            referral_partner: referral_partner || null,
-            workshop_cohort: workshop_cohort || null,
-          },
-          { onConflict: 'email' }
-        );
+      const { email, ghl_contact_id, utm_source, utm_campaign, utm_content, utm_medium, referral_partner, workshop_cohort } = body;
+      await query(
+        `INSERT INTO contacts (email, ghl_contact_id, lead_source, utm_campaign, utm_content, utm_medium, referral_partner, workshop_cohort)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (ghl_contact_id) DO UPDATE SET
+           email = EXCLUDED.email,
+           lead_source = COALESCE(EXCLUDED.lead_source, contacts.lead_source),
+           utm_campaign = COALESCE(EXCLUDED.utm_campaign, contacts.utm_campaign),
+           utm_content = COALESCE(EXCLUDED.utm_content, contacts.utm_content),
+           utm_medium = COALESCE(EXCLUDED.utm_medium, contacts.utm_medium),
+           referral_partner = COALESCE(EXCLUDED.referral_partner, contacts.referral_partner),
+           workshop_cohort = COALESCE(EXCLUDED.workshop_cohort, contacts.workshop_cohort)`,
+        [email, ghl_contact_id, utm_source || null, utm_campaign || null, utm_content || null, utm_medium || null, referral_partner || null, workshop_cohort || null],
+      );
       break;
     }
 
@@ -56,42 +60,26 @@ async function processEvent(event: string, body: Record<string, any>): Promise<v
 
       switch (tag) {
         case 'workshop-buyer':
-          await supabase
-            .from('contacts')
-            .update({ is_workshop_buyer: true })
-            .eq('email', email);
+          await query(`UPDATE contacts SET is_workshop_buyer = true WHERE email = $1`, [email]);
           break;
 
         case 'deposit-paid':
-          await supabase
-            .from('contacts')
-            .update({ deposit_paid: true, deposit_paid_at: new Date().toISOString() })
-            .eq('email', email);
+          await query(`UPDATE contacts SET deposit_paid = true, deposit_paid_at = NOW() WHERE email = $1`, [email]);
           break;
 
         case 'call-booked':
-          await supabase
-            .from('contacts')
-            .update({ call_booked: true, call_booked_at: new Date().toISOString() })
-            .eq('email', email);
+          await query(`UPDATE contacts SET call_booked = true, call_booked_at = NOW() WHERE email = $1`, [email]);
           break;
 
         case 'prime-elite-member':
-          await supabase
-            .from('contacts')
-            .update({
-              converted_to_pe: true,
-              converted_at: new Date().toISOString(),
-              mrr_value: 2500,
-            })
-            .eq('email', email);
+          await query(
+            `UPDATE contacts SET converted_to_pe = true, converted_at = NOW(), mrr_value = 2500 WHERE email = $1`,
+            [email],
+          );
           break;
 
         case 'workshop-noshow':
-          await supabase
-            .from('contacts')
-            .update({ attended_workshop: false })
-            .eq('email', email);
+          await query(`UPDATE contacts SET attended_workshop = false WHERE email = $1`, [email]);
           break;
 
         default:
@@ -110,17 +98,12 @@ async function processEvent(event: string, body: Record<string, any>): Promise<v
         'No-show': 'no_show',
       };
 
-      const disposition = stageMap[stage_name] || stage_name;
+      const disposition = stageMap[stage_name] || null;
 
-      await supabase
-        .from('contacts')
-        .update({
-          call_disposition: disposition,
-          assigned_rep: owner || null,
-          call_completed: true,
-          call_completed_at: new Date().toISOString(),
-        })
-        .eq('email', email);
+      await query(
+        `UPDATE contacts SET call_disposition = $1, assigned_rep = $2, call_completed = true, call_completed_at = NOW() WHERE email = $3`,
+        [disposition, owner || null, email],
+      );
       break;
     }
 

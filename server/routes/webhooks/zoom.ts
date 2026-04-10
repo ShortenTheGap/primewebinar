@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import crypto from 'crypto';
-import { supabase } from '../../lib/supabase.js';
+import { query } from '../../lib/db.js';
 
 const router = Router();
 
@@ -42,7 +42,6 @@ router.post('/', (req: Request, res: Response) => {
     return;
   }
 
-  // Return 200 immediately
   res.status(200).json({ received: true });
 
   const { event, payload } = req.body;
@@ -61,59 +60,36 @@ async function processParticipantLeft(payload: Record<string, any>): Promise<voi
   const email = participant.email as string;
   const joinTime = participant.join_time as string;
   const leaveTime = participant.leave_time as string;
-  const webinarId = webinarObj.id as string;
+  const webinarId = String(webinarObj.id);
 
-  // Calculate duration in minutes
   const durationMs = new Date(leaveTime).getTime() - new Date(joinTime).getTime();
   const durationMinutes = Math.round(durationMs / 60000);
 
-  // Upsert into zoom_attendance by webinar_id + email
-  const { error: upsertError } = await supabase
-    .from('zoom_attendance')
-    .upsert(
-      {
-        webinar_id: String(webinarId),
-        email,
-        join_time: joinTime,
-        leave_time: leaveTime,
-        duration_minutes: durationMinutes,
-      },
-      { onConflict: 'webinar_id,email' }
-    );
-
-  if (upsertError) {
-    console.error('Error upserting zoom_attendance:', upsertError);
-    return;
-  }
+  // Upsert into zoom_attendance
+  await query(
+    `INSERT INTO zoom_attendance (webinar_id, email, join_time, leave_time, duration_minutes)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (webinar_id, email) DO UPDATE SET
+       join_time = EXCLUDED.join_time,
+       leave_time = EXCLUDED.leave_time,
+       duration_minutes = EXCLUDED.duration_minutes`,
+    [webinarId, email, joinTime, leaveTime, durationMinutes],
+  );
 
   // Match to contacts by email
-  const { data: contact } = await supabase
-    .from('contacts')
-    .select('id')
-    .eq('email', email)
-    .maybeSingle();
+  const result = await query(`SELECT id FROM contacts WHERE email = $1 LIMIT 1`, [email]);
+  const contact = result.rows[0];
 
   if (contact) {
-    // Mark contact as attended
-    await supabase
-      .from('contacts')
-      .update({ attended_workshop: true })
-      .eq('email', email);
+    // Mark attended + link zoom record
+    await query(`UPDATE contacts SET attended_workshop = true WHERE email = $1`, [email]);
+    await query(
+      `UPDATE zoom_attendance SET matched_contact_id = $1 WHERE webinar_id = $2 AND email = $3`,
+      [contact.id, webinarId, email],
+    );
 
-    // Update matched_contact_id in zoom_attendance
-    await supabase
-      .from('zoom_attendance')
-      .update({ matched_contact_id: contact.id })
-      .eq('webinar_id', String(webinarId))
-      .eq('email', email);
-
-    // If duration > 45 min, mark as high intent
     if (durationMinutes > 45) {
       console.log(`High intent participant: ${email} (${durationMinutes} min in webinar ${webinarId})`);
-      await supabase
-        .from('contacts')
-        .update({ high_intent: true })
-        .eq('email', email);
     }
   } else {
     console.log(`No matching contact found for Zoom participant: ${email}`);

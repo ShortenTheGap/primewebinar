@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from 'express';
-import { supabase } from '../../lib/supabase.js';
+import { query } from '../../lib/db.js';
 import { computeDashboardMetrics } from '../../lib/metrics.js';
 
 const router = Router();
@@ -8,54 +8,29 @@ router.get('/', async (req: Request, res: Response) => {
   try {
     const cohort = (req.query.cohort as string) || 'all';
 
-    // Fetch cohorts list
-    const { data: cohorts, error: cohortsError } = await supabase
-      .from('cohorts')
-      .select('*')
-      .order('workshop_date', { ascending: false });
+    // Fetch cohorts
+    const cohortsResult = await query(
+      `SELECT * FROM cohorts ORDER BY workshop_date DESC`,
+    );
 
-    if (cohortsError) {
-      console.error('Error fetching cohorts:', cohortsError);
-    }
-
-    // Fetch contacts
-    let contactsQuery = supabase.from('contacts').select('*');
-    if (cohort !== 'all') {
-      contactsQuery = contactsQuery.eq('workshop_cohort', cohort);
-    }
-    const { data: contacts, error: contactsError } = await contactsQuery;
-
-    if (contactsError) {
-      console.error('Error fetching contacts:', contactsError);
-      res.status(500).json({ error: 'Failed to fetch contacts' });
-      return;
-    }
+    // Fetch contacts (optionally filtered by cohort)
+    const contactsResult = cohort !== 'all'
+      ? await query(`SELECT * FROM contacts WHERE workshop_cohort = $1`, [cohort])
+      : await query(`SELECT * FROM contacts`);
 
     // Fetch ad_spend
-    const { data: adSpend, error: adSpendError } = await supabase
-      .from('ad_spend')
-      .select('*');
+    const adSpendResult = await query(`SELECT * FROM ad_spend`);
 
-    if (adSpendError) {
-      console.error('Error fetching ad_spend:', adSpendError);
-    }
-
-    // Fetch zoom_attendance
-    let zoomQuery = supabase.from('zoom_attendance').select('*');
-    if (cohort !== 'all') {
-      zoomQuery = zoomQuery.eq('workshop_cohort', cohort);
-    }
-    const { data: zoomAttendance, error: zoomError } = await zoomQuery;
-
-    if (zoomError) {
-      console.error('Error fetching zoom_attendance:', zoomError);
-    }
+    // Fetch zoom_attendance (optionally filtered)
+    const zoomResult = cohort !== 'all'
+      ? await query(`SELECT * FROM zoom_attendance WHERE workshop_cohort = $1`, [cohort])
+      : await query(`SELECT * FROM zoom_attendance`);
 
     const payload = computeDashboardMetrics({
-      contacts: contacts || [],
-      adSpend: adSpend || [],
-      zoomAttendance: zoomAttendance || [],
-      cohorts: cohorts || [],
+      contacts: contactsResult.rows,
+      adSpend: adSpendResult.rows,
+      zoomAttendance: zoomResult.rows,
+      cohorts: cohortsResult.rows,
     });
 
     res.json(payload);
