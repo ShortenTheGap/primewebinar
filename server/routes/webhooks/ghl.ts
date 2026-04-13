@@ -34,11 +34,18 @@ router.post('/', (req: Request, res: Response) => {
 
 export async function processGhlEvent(event: string, body: Record<string, any>): Promise<void> {
   switch (event) {
-    case 'contact.created': {
+    case 'contact.created':
+    case 'contact.purchased': {
+      // contact.purchased also sets is_workshop_buyer = true. Use this when
+      // a single GHL workflow (e.g. ticket purchase) is the source of truth
+      // for buyer status — no need for a separate tag-added workflow.
+      const isBuyer = event === 'contact.purchased';
       const { email, ghl_contact_id, utm_source, utm_campaign, utm_content, utm_medium, referral_partner, workshop_cohort } = body;
       await query(
-        `INSERT INTO contacts (email, ghl_contact_id, lead_source, utm_campaign, utm_content, utm_medium, referral_partner, workshop_cohort)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `INSERT INTO contacts (
+           email, ghl_contact_id, lead_source, utm_campaign, utm_content,
+           utm_medium, referral_partner, workshop_cohort, is_workshop_buyer
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          ON CONFLICT (ghl_contact_id) DO UPDATE SET
            email = EXCLUDED.email,
            lead_source = COALESCE(EXCLUDED.lead_source, contacts.lead_source),
@@ -46,8 +53,14 @@ export async function processGhlEvent(event: string, body: Record<string, any>):
            utm_content = COALESCE(EXCLUDED.utm_content, contacts.utm_content),
            utm_medium = COALESCE(EXCLUDED.utm_medium, contacts.utm_medium),
            referral_partner = COALESCE(EXCLUDED.referral_partner, contacts.referral_partner),
-           workshop_cohort = COALESCE(EXCLUDED.workshop_cohort, contacts.workshop_cohort)`,
-        [email, ghl_contact_id, utm_source || null, utm_campaign || null, utm_content || null, utm_medium || null, referral_partner || null, workshop_cohort || null],
+           workshop_cohort = COALESCE(EXCLUDED.workshop_cohort, contacts.workshop_cohort),
+           is_workshop_buyer = EXCLUDED.is_workshop_buyer OR contacts.is_workshop_buyer`,
+        [
+          email, ghl_contact_id,
+          utm_source || null, utm_campaign || null, utm_content || null,
+          utm_medium || null, referral_partner || null, workshop_cohort || null,
+          isBuyer,
+        ],
       );
       break;
     }
