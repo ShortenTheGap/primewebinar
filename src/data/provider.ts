@@ -12,7 +12,14 @@ export async function getDashboardData(cohort?: string): Promise<DashboardPayloa
   params.set('cohort', cohort || 'all');
   const res = await fetch(`/api/dashboard?${params.toString()}`);
   if (!res.ok) {
-    throw new Error(`Dashboard API error: ${res.status}`);
+    let detail = '';
+    try {
+      const body = await res.json();
+      detail = body?.error || JSON.stringify(body);
+    } catch {
+      detail = await res.text().catch(() => '');
+    }
+    throw new Error(`API ${res.status}: ${detail || 'Unknown error'}`);
   }
   return res.json();
 }
