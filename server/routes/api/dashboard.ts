@@ -34,9 +34,12 @@ router.get('/', async (req: Request, res: Response) => {
     });
 
     res.json(payload);
-  } catch (err) {
+  } catch (err: any) {
     console.error('Dashboard API error:', err);
-    res.status(500).json({ error: 'Internal server error' });
+    const message = err?.message || 'Internal server error';
+    // Surface the real message so the frontend can tell the user what's wrong
+    // (e.g. "DATABASE_URL must be set", "relation 'contacts' does not exist")
+    res.status(500).json({ error: message });
   }
 });
 
