@@ -12,6 +12,14 @@ import { initSchema } from './lib/db.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Global safety nets — log but don't crash on unhandled errors
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err);
+});
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 

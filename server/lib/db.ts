@@ -16,7 +16,19 @@ export function getPool(): pg.Pool {
     if (!connectionString) {
       throw new Error('DATABASE_URL must be set');
     }
-    _pool = new Pool({ connectionString });
+    _pool = new Pool({
+      connectionString,
+      // Railway drops idle connections — keep pool size modest and recycle often
+      max: 10,
+      idleTimeoutMillis: 30_000,
+      connectionTimeoutMillis: 10_000,
+    });
+
+    // CRITICAL: pg pools crash the Node process if idle client errors
+    // (e.g. Railway dropping idle TCP connections) have no listener.
+    _pool.on('error', (err) => {
+      console.error('[pg pool] idle client error (recovered):', err.message);
+    });
   }
   return _pool;
 }
