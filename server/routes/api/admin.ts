@@ -219,6 +219,43 @@ router.post('/import-contacts', async (req: Request, res: Response) => {
 });
 
 /**
+ * GET /api/admin/contacts?limit=20
+ * Inspect recent contact rows for debugging. Shows the exact values stored —
+ * critical for verifying workshop_cohort format, UTM fields, tags, etc.
+ */
+router.get('/contacts', async (req: Request, res: Response) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string, 10) || 20, 1), 200);
+    const cohort = req.query.cohort as string | undefined;
+
+    const result = cohort
+      ? await query(
+          `SELECT email, ghl_contact_id, workshop_cohort, lead_source,
+                  is_workshop_buyer, attended_workshop, deposit_paid,
+                  call_booked, call_completed, call_disposition,
+                  converted_to_pe, mrr_value, created_at
+           FROM contacts WHERE workshop_cohort = $1 ORDER BY created_at DESC LIMIT $2`,
+          [cohort, limit],
+        )
+      : await query(
+          `SELECT email, ghl_contact_id, workshop_cohort, lead_source,
+                  is_workshop_buyer, attended_workshop, deposit_paid,
+                  call_booked, call_completed, call_disposition,
+                  converted_to_pe, mrr_value, created_at
+           FROM contacts ORDER BY created_at DESC LIMIT $1`,
+          [limit],
+        );
+
+    res.json({
+      count: result.rowCount,
+      contacts: result.rows,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to list contacts' });
+  }
+});
+
+/**
  * POST /api/admin/simulate-ghl
  * Runs a GHL event through the real handler. Lets you test the full pipeline
  * end-to-end without needing to configure GHL webhooks.
