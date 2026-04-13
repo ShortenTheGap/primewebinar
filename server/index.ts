@@ -6,6 +6,7 @@ import ghlRouter from './routes/webhooks/ghl.js';
 import zoomRouter from './routes/webhooks/zoom.js';
 import dashboardRouter from './routes/api/dashboard.js';
 import { startMetaAdsCron } from './jobs/metaAdsCron.js';
+import { initSchema } from './lib/db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,9 +33,14 @@ app.get('*', (_req, res) => {
   res.sendFile(path.join(clientDir, 'index.html'));
 });
 
-// Start the Meta Ads cron job
-startMetaAdsCron();
-
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+// Initialize schema (idempotent), then start the server
+initSchema()
+  .catch((err) => {
+    console.error('Schema init failed — continuing anyway:', err);
+  })
+  .finally(() => {
+    startMetaAdsCron();
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  });

@@ -1,11 +1,16 @@
--- Prime Elite Workshop Funnel — Supabase Schema
--- Run once to initialize the database
+-- Prime Elite Workshop Funnel — Database Schema
+-- This file runs automatically on server startup (see server/lib/db.ts).
+-- It is idempotent — safe to run multiple times.
 
 -- Enum for call dispositions
-CREATE TYPE call_disposition_type AS ENUM ('sold', 'follow_up', 'not_a_fit', 'no_show');
+DO $$ BEGIN
+  CREATE TYPE call_disposition_type AS ENUM ('sold', 'follow_up', 'not_a_fit', 'no_show');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
 
 -- Cohorts table — one row per workshop date
-CREATE TABLE cohorts (
+CREATE TABLE IF NOT EXISTS cohorts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   workshop_date DATE NOT NULL UNIQUE,
   label TEXT NOT NULL,
@@ -14,7 +19,7 @@ CREATE TABLE cohorts (
 );
 
 -- Contacts table — one row per GHL contact
-CREATE TABLE contacts (
+CREATE TABLE IF NOT EXISTS contacts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   ghl_contact_id TEXT UNIQUE,
   email TEXT,
@@ -42,7 +47,7 @@ CREATE TABLE contacts (
 );
 
 -- Ad spend table — one row per day per campaign
-CREATE TABLE ad_spend (
+CREATE TABLE IF NOT EXISTS ad_spend (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   date DATE NOT NULL,
   campaign_id TEXT NOT NULL,
@@ -58,7 +63,7 @@ CREATE TABLE ad_spend (
 );
 
 -- Zoom attendance table — one row per attendee per session
-CREATE TABLE zoom_attendance (
+CREATE TABLE IF NOT EXISTS zoom_attendance (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   webinar_id TEXT NOT NULL,
   email TEXT NOT NULL,
@@ -71,10 +76,10 @@ CREATE TABLE zoom_attendance (
 );
 
 -- Indexes
-CREATE INDEX idx_contacts_workshop_cohort ON contacts(workshop_cohort);
-CREATE INDEX idx_contacts_lead_source ON contacts(lead_source);
-CREATE INDEX idx_contacts_call_disposition ON contacts(call_disposition);
-CREATE INDEX idx_ad_spend_date ON ad_spend(date);
-CREATE INDEX idx_zoom_attendance_workshop_cohort ON zoom_attendance(workshop_cohort);
-CREATE INDEX idx_contacts_email ON contacts(email);
-CREATE INDEX idx_zoom_attendance_email ON zoom_attendance(email);
+CREATE INDEX IF NOT EXISTS idx_contacts_workshop_cohort ON contacts(workshop_cohort);
+CREATE INDEX IF NOT EXISTS idx_contacts_lead_source ON contacts(lead_source);
+CREATE INDEX IF NOT EXISTS idx_contacts_call_disposition ON contacts(call_disposition);
+CREATE INDEX IF NOT EXISTS idx_ad_spend_date ON ad_spend(date);
+CREATE INDEX IF NOT EXISTS idx_zoom_attendance_workshop_cohort ON zoom_attendance(workshop_cohort);
+CREATE INDEX IF NOT EXISTS idx_contacts_email ON contacts(email);
+CREATE INDEX IF NOT EXISTS idx_zoom_attendance_email ON zoom_attendance(email);
