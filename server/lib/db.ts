@@ -3,7 +3,14 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-const { Pool } = pg;
+const { Pool, types } = pg;
+
+// pg returns DATE columns as JavaScript Date objects by default, which breaks
+// when used as Map keys (every row gets a distinct object reference → rows
+// that share the same calendar date never group together). Force DATE → string
+// in YYYY-MM-DD format to keep downstream grouping/comparison sane.
+// OID 1082 = DATE
+types.setTypeParser(1082, (val: string) => val);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
