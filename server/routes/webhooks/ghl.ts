@@ -4,24 +4,21 @@ import { query } from '../../lib/db.js';
 
 const router = Router();
 
-function verifySignature(payload: string, signature: string): boolean {
-  const secret = process.env.GHL_WEBHOOK_SECRET || '';
-  if (!secret) return false;
-  const hmac = crypto.createHmac('sha256', secret);
-  hmac.update(payload);
-  const digest = hmac.digest('hex');
+function verifyGhlToken(provided: string | undefined): boolean {
+  const expected = process.env.GHL_WEBHOOK_SECRET || '';
+  if (!expected || !provided) return false;
   try {
-    return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(signature));
+    return crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
   } catch {
     return false;
   }
 }
 
 router.post('/', (req: Request, res: Response) => {
-  const signature = req.headers['x-ghl-signature'] as string | undefined;
+  const token = req.headers['x-ghl-token'] as string | undefined;
 
-  if (!signature || !verifySignature(JSON.stringify(req.body), signature)) {
-    res.status(401).json({ error: 'Invalid signature' });
+  if (!verifyGhlToken(token)) {
+    res.status(401).json({ error: 'Invalid or missing x-ghl-token header' });
     return;
   }
 
@@ -30,12 +27,12 @@ router.post('/', (req: Request, res: Response) => {
 
   const { event, body } = req.body;
 
-  processEvent(event, body).catch((err) => {
+  processGhlEvent(event, body).catch((err) => {
     console.error('GHL webhook processing error:', err);
   });
 });
 
-async function processEvent(event: string, body: Record<string, any>): Promise<void> {
+export async function processGhlEvent(event: string, body: Record<string, any>): Promise<void> {
   switch (event) {
     case 'contact.created': {
       const { email, ghl_contact_id, utm_source, utm_campaign, utm_content, utm_medium, referral_partner, workshop_cohort } = body;
