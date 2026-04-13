@@ -6,6 +6,7 @@ import ghlRouter from './routes/webhooks/ghl.js';
 import zoomRouter from './routes/webhooks/zoom.js';
 import dashboardRouter from './routes/api/dashboard.js';
 import healthRouter from './routes/api/health.js';
+import adminRouter from './routes/api/admin.js';
 import { startMetaAdsCron } from './jobs/metaAdsCron.js';
 import { initSchema } from './lib/db.js';
 
@@ -37,6 +38,7 @@ app.use('/webhooks/ghl', ghlRouter);
 app.use('/webhooks/zoom', zoomRouter);
 app.use('/api/dashboard', dashboardRouter);
 app.use('/api/health', healthRouter);
+app.use('/api/admin', adminRouter);
 
 // SPA fallback — serve index.html for all non-API/webhook routes
 app.get('*', (_req, res) => {
