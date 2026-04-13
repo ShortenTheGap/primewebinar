@@ -110,6 +110,115 @@ router.delete('/cohorts/:workshop_date', async (req: Request, res: Response) => 
 });
 
 /**
+ * POST /api/admin/import-contacts
+ * Bulk upsert of real contacts with full funnel state. For backfilling
+ * historical cohorts that happened before webhooks were wired up.
+ *
+ * Body: { contacts: [ { email, workshop_cohort, is_workshop_buyer, ... } ] }
+ *
+ * Upsert key: email. Provide whichever fields you have; missing fields
+ * default to safe values. Dates like deposit_paid_at are auto-set to NOW()
+ * when their corresponding boolean is true and no explicit timestamp given.
+ */
+router.post('/import-contacts', async (req: Request, res: Response) => {
+  try {
+    const contacts: any[] = Array.isArray(req.body?.contacts) ? req.body.contacts : [];
+    if (contacts.length === 0) {
+      res.status(400).json({ error: 'Body must be { contacts: [...] } with at least one row' });
+      return;
+    }
+
+    const validDispositions = new Set(['sold', 'follow_up', 'not_a_fit', 'no_show']);
+    const results = { inserted: 0, updated: 0, skipped: [] as string[] };
+
+    for (const c of contacts) {
+      if (!c.email) {
+        results.skipped.push(`(no email: ${JSON.stringify(c).slice(0, 60)})`);
+        continue;
+      }
+
+      const disposition = c.call_disposition && validDispositions.has(c.call_disposition)
+        ? c.call_disposition
+        : null;
+
+      const now = new Date();
+      const depositAt = c.deposit_paid_at ? new Date(c.deposit_paid_at) : (c.deposit_paid ? now : null);
+      const bookedAt = c.call_booked_at ? new Date(c.call_booked_at) : (c.call_booked ? now : null);
+      const completedAt = c.call_completed_at ? new Date(c.call_completed_at) : (c.call_completed ? now : null);
+      const convertedAt = c.converted_at ? new Date(c.converted_at) : (c.converted_to_pe ? now : null);
+
+      const result = await query(
+        `INSERT INTO contacts (
+           email, ghl_contact_id, workshop_cohort, lead_source, utm_campaign,
+           utm_content, utm_medium, referral_partner,
+           is_workshop_buyer, attended_workshop,
+           deposit_paid, deposit_paid_at, deposit_refunded,
+           call_booked, call_booked_at,
+           call_completed, call_completed_at,
+           call_disposition, converted_to_pe, converted_at,
+           assigned_rep, mrr_value
+         ) VALUES (
+           $1, $2, $3, $4, $5, $6, $7, $8,
+           $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
+         )
+         ON CONFLICT (ghl_contact_id) DO UPDATE SET
+           email = EXCLUDED.email,
+           workshop_cohort = COALESCE(EXCLUDED.workshop_cohort, contacts.workshop_cohort),
+           lead_source = COALESCE(EXCLUDED.lead_source, contacts.lead_source),
+           referral_partner = COALESCE(EXCLUDED.referral_partner, contacts.referral_partner),
+           is_workshop_buyer = EXCLUDED.is_workshop_buyer OR contacts.is_workshop_buyer,
+           attended_workshop = COALESCE(EXCLUDED.attended_workshop, contacts.attended_workshop),
+           deposit_paid = EXCLUDED.deposit_paid OR contacts.deposit_paid,
+           deposit_paid_at = COALESCE(contacts.deposit_paid_at, EXCLUDED.deposit_paid_at),
+           deposit_refunded = EXCLUDED.deposit_refunded OR contacts.deposit_refunded,
+           call_booked = EXCLUDED.call_booked OR contacts.call_booked,
+           call_booked_at = COALESCE(contacts.call_booked_at, EXCLUDED.call_booked_at),
+           call_completed = EXCLUDED.call_completed OR contacts.call_completed,
+           call_completed_at = COALESCE(contacts.call_completed_at, EXCLUDED.call_completed_at),
+           call_disposition = COALESCE(EXCLUDED.call_disposition, contacts.call_disposition),
+           converted_to_pe = EXCLUDED.converted_to_pe OR contacts.converted_to_pe,
+           converted_at = COALESCE(contacts.converted_at, EXCLUDED.converted_at),
+           assigned_rep = COALESCE(EXCLUDED.assigned_rep, contacts.assigned_rep),
+           mrr_value = GREATEST(EXCLUDED.mrr_value, contacts.mrr_value)
+         RETURNING (xmax = 0) AS inserted`,
+        [
+          c.email,
+          c.ghl_contact_id || c.email, // fall back to email as unique key if no GHL id
+          c.workshop_cohort || null,
+          c.lead_source || null,
+          c.utm_campaign || null,
+          c.utm_content || null,
+          c.utm_medium || null,
+          c.referral_partner || null,
+          c.is_workshop_buyer ?? true,
+          c.attended_workshop ?? null,
+          c.deposit_paid ?? false,
+          depositAt,
+          c.deposit_refunded ?? false,
+          c.call_booked ?? false,
+          bookedAt,
+          c.call_completed ?? false,
+          completedAt,
+          disposition,
+          c.converted_to_pe ?? false,
+          convertedAt,
+          c.assigned_rep || null,
+          c.mrr_value ?? (c.converted_to_pe ? 2500 : 0),
+        ],
+      );
+
+      if (result.rows[0]?.inserted) results.inserted++;
+      else results.updated++;
+    }
+
+    res.json({ ok: true, ...results });
+  } catch (err: any) {
+    console.error('Import failed:', err);
+    res.status(500).json({ error: err?.message || 'Import failed' });
+  }
+});
+
+/**
  * POST /api/admin/simulate-ghl
  * Runs a GHL event through the real handler. Lets you test the full pipeline
  * end-to-end without needing to configure GHL webhooks.
