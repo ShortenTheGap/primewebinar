@@ -256,6 +256,112 @@ router.get('/contacts', async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/admin/import-zoom-attendance
+ * Bulk import Zoom webinar attendee data (from a CSV export). Matches
+ * attendees to existing contacts by email and updates their attendance
+ * flags. Rows with no matching contact are still stored in zoom_attendance
+ * for later reconciliation.
+ *
+ * Body:
+ * {
+ *   "webinar_id": "82612345678",           // required — from Zoom
+ *   "workshop_cohort": "2026-04-02",       // required — YYYY-MM-DD
+ *   "full_session_minutes": 45,            // optional — threshold for "stayed to end"
+ *   "attendees": [
+ *     { "email": "x@y.com", "join_time": "...", "leave_time": "...", "duration_minutes": 58 },
+ *     ...
+ *   ]
+ * }
+ *
+ * duration_minutes can be provided directly, or computed from join/leave times.
+ */
+router.post('/import-zoom-attendance', async (req: Request, res: Response) => {
+  try {
+    const { webinar_id, workshop_cohort, attendees } = req.body || {};
+    const fullSessionMinutes: number = Number(req.body?.full_session_minutes) || 45;
+
+    if (!webinar_id || typeof webinar_id !== 'string') {
+      res.status(400).json({ error: 'webinar_id is required (string)' });
+      return;
+    }
+    if (!workshop_cohort || !/^\d{4}-\d{2}-\d{2}$/.test(workshop_cohort)) {
+      res.status(400).json({ error: 'workshop_cohort required in YYYY-MM-DD format' });
+      return;
+    }
+    if (!Array.isArray(attendees) || attendees.length === 0) {
+      res.status(400).json({ error: 'attendees must be a non-empty array' });
+      return;
+    }
+
+    const results = {
+      attendeesImported: 0,
+      contactsMatched: 0,
+      contactsStayedFullSession: 0,
+      unmatched: [] as string[],
+    };
+
+    for (const a of attendees) {
+      const email: string = (a.email || '').toLowerCase().trim();
+      if (!email) continue;
+
+      let duration = Number(a.duration_minutes);
+      if (!duration && a.join_time && a.leave_time) {
+        const ms = new Date(a.leave_time).getTime() - new Date(a.join_time).getTime();
+        duration = Math.round(ms / 60000);
+      }
+      duration = Math.max(0, duration || 0);
+
+      // Upsert zoom_attendance row
+      await query(
+        `INSERT INTO zoom_attendance
+           (webinar_id, email, join_time, leave_time, duration_minutes, workshop_cohort)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (webinar_id, email) DO UPDATE SET
+           join_time = COALESCE(EXCLUDED.join_time, zoom_attendance.join_time),
+           leave_time = COALESCE(EXCLUDED.leave_time, zoom_attendance.leave_time),
+           duration_minutes = GREATEST(EXCLUDED.duration_minutes, zoom_attendance.duration_minutes),
+           workshop_cohort = COALESCE(EXCLUDED.workshop_cohort, zoom_attendance.workshop_cohort)`,
+        [webinar_id, email, a.join_time || null, a.leave_time || null, duration, workshop_cohort],
+      );
+      results.attendeesImported++;
+
+      // Try to match to a contact
+      const contactResult = await query(
+        `SELECT id FROM contacts WHERE LOWER(email) = $1 LIMIT 1`,
+        [email],
+      );
+      const contact = contactResult.rows[0];
+
+      if (contact) {
+        const stayedFull = duration >= fullSessionMinutes;
+        if (stayedFull) results.contactsStayedFullSession++;
+
+        await query(
+          `UPDATE contacts SET
+             attended_workshop = true,
+             attended_full_session = $1 OR attended_full_session,
+             attended_minutes = GREATEST(COALESCE(attended_minutes, 0), $2)
+           WHERE id = $3`,
+          [stayedFull, duration, contact.id],
+        );
+        await query(
+          `UPDATE zoom_attendance SET matched_contact_id = $1 WHERE webinar_id = $2 AND email = $3`,
+          [contact.id, webinar_id, email],
+        );
+        results.contactsMatched++;
+      } else {
+        results.unmatched.push(email);
+      }
+    }
+
+    res.json({ ok: true, ...results });
+  } catch (err: any) {
+    console.error('Zoom import failed:', err);
+    res.status(500).json({ error: err?.message || 'Zoom import failed' });
+  }
+});
+
+/**
  * POST /api/admin/simulate-ghl
  * Runs a GHL event through the real handler. Lets you test the full pipeline
  * end-to-end without needing to configure GHL webhooks.

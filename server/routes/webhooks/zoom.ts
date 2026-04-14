@@ -81,16 +81,21 @@ async function processParticipantLeft(payload: Record<string, any>): Promise<voi
   const contact = result.rows[0];
 
   if (contact) {
-    // Mark attended + link zoom record
-    await query(`UPDATE contacts SET attended_workshop = true WHERE email = $1`, [email]);
+    // 45 min = stayed through meaningful portion of a 60-min session
+    const stayedFullSession = durationMinutes >= 45;
+
+    await query(
+      `UPDATE contacts SET
+         attended_workshop = true,
+         attended_full_session = $1 OR attended_full_session,
+         attended_minutes = GREATEST(COALESCE(attended_minutes, 0), $2)
+       WHERE email = $3`,
+      [stayedFullSession, durationMinutes, email],
+    );
     await query(
       `UPDATE zoom_attendance SET matched_contact_id = $1 WHERE webinar_id = $2 AND email = $3`,
       [contact.id, webinarId, email],
     );
-
-    if (durationMinutes > 45) {
-      console.log(`High intent participant: ${email} (${durationMinutes} min in webinar ${webinarId})`);
-    }
   } else {
     console.log(`No matching contact found for Zoom participant: ${email}`);
   }

@@ -83,3 +83,7 @@ CREATE INDEX IF NOT EXISTS idx_ad_spend_date ON ad_spend(date);
 CREATE INDEX IF NOT EXISTS idx_zoom_attendance_workshop_cohort ON zoom_attendance(workshop_cohort);
 CREATE INDEX IF NOT EXISTS idx_contacts_email ON contacts(email);
 CREATE INDEX IF NOT EXISTS idx_zoom_attendance_email ON zoom_attendance(email);
+
+-- Migrations (idempotent ALTERs for fields added after initial schema)
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS attended_full_session BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS attended_minutes INTEGER;
