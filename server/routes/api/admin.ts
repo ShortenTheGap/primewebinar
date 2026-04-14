@@ -1,4 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
+import { parse as parseCsv } from 'csv-parse/sync';
 import { query } from '../../lib/db.js';
 import { processGhlEvent } from '../webhooks/ghl.js';
 
@@ -444,6 +445,174 @@ router.post('/import-zoom-attendance', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('Zoom import failed:', err);
     res.status(500).json({ error: err?.message || 'Zoom import failed' });
+  }
+});
+
+/**
+ * POST /api/admin/import-zoom-csv
+ * Upload a raw Zoom Attendee Report CSV and auto-import attendance.
+ * Handles Zoom's usual format — header/summary rows at the top, then the
+ * actual table starting with columns like "Name", "User Email",
+ * "Join Time", "Leave Time", "Time in Session (minutes)".
+ *
+ * Send as:
+ *   Content-Type: text/csv
+ *   curl --data-binary @report.csv ?workshop_cohort=2026-04-02&webinar_id=XXX
+ *
+ * Query params (all required except full_session_minutes):
+ *   workshop_cohort=YYYY-MM-DD
+ *   webinar_id=<any string, can be from Zoom or just the cohort date>
+ *   full_session_minutes=45  (default 45)
+ */
+router.post('/import-zoom-csv', async (req: Request, res: Response) => {
+  try {
+    const cohort = req.query.workshop_cohort as string;
+    const webinarId = (req.query.webinar_id as string) || `apr2-${cohort}`;
+    const fullSessionMinutes = Number(req.query.full_session_minutes) || 45;
+
+    if (!cohort || !/^\d{4}-\d{2}-\d{2}$/.test(cohort)) {
+      res.status(400).json({ error: 'workshop_cohort query param required (YYYY-MM-DD)' });
+      return;
+    }
+
+    const csvText = typeof req.body === 'string' ? req.body : '';
+    if (!csvText.trim()) {
+      res.status(400).json({ error: 'CSV body is empty. Send with Content-Type: text/csv and --data-binary @file.csv' });
+      return;
+    }
+
+    // Parse CSV as a 2D array so we can hunt for the header row ourselves.
+    const rows: string[][] = parseCsv(csvText, {
+      skip_empty_lines: true,
+      relax_quotes: true,
+      relax_column_count: true,
+    });
+
+    // Find the header row: the first row that contains both an Email-like
+    // column AND a Time/Duration-like column. Zoom's attendee report has
+    // a summary block at the top; the real table starts lower down.
+    let headerIdx = -1;
+    let emailCol = -1, joinCol = -1, leaveCol = -1, durationCol = -1, attendedCol = -1;
+
+    const normalize = (s: string) => (s || '').toLowerCase().trim();
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i].map(normalize);
+      const ec = row.findIndex((c) => c.includes('email'));
+      const dc = row.findIndex((c) => c.includes('time in session') || c.includes('duration') || c.includes('time (minutes)'));
+      if (ec >= 0 && dc >= 0) {
+        headerIdx = i;
+        emailCol = ec;
+        durationCol = dc;
+        joinCol = row.findIndex((c) => c.includes('join time') || c === 'join');
+        leaveCol = row.findIndex((c) => c.includes('leave time') || c === 'leave');
+        attendedCol = row.findIndex((c) => c === 'attended');
+        break;
+      }
+    }
+
+    if (headerIdx < 0) {
+      res.status(400).json({
+        error: "Couldn't find the attendee table header. Expected columns like 'User Email' and 'Time in Session (minutes)'. Are you sure this is the Zoom Attendee Report?",
+      });
+      return;
+    }
+
+    const attendees: Array<{
+      email: string;
+      join_time: string | null;
+      leave_time: string | null;
+      duration_minutes: number;
+    }> = [];
+
+    for (let i = headerIdx + 1; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row || row.length === 0) continue;
+      // Stop at an empty/summary row
+      if (!row[emailCol] || !row[emailCol].trim()) continue;
+
+      // Filter to only attended=Yes if that column exists
+      if (attendedCol >= 0) {
+        const attendedVal = (row[attendedCol] || '').toLowerCase().trim();
+        if (attendedVal && attendedVal !== 'yes' && attendedVal !== 'true') continue;
+      }
+
+      const email = row[emailCol].trim().toLowerCase();
+      if (!email.includes('@')) continue; // skip non-email rows (e.g. another summary section)
+
+      const durationRaw = row[durationCol] || '0';
+      const duration = parseInt(durationRaw.toString().replace(/[^\d]/g, ''), 10) || 0;
+
+      attendees.push({
+        email,
+        join_time: joinCol >= 0 ? (row[joinCol] || null) : null,
+        leave_time: leaveCol >= 0 ? (row[leaveCol] || null) : null,
+        duration_minutes: duration,
+      });
+    }
+
+    if (attendees.length === 0) {
+      res.status(400).json({ error: 'No attendee rows found in CSV' });
+      return;
+    }
+
+    // Now run the same logic as /import-zoom-attendance
+    const results = {
+      attendeesImported: 0,
+      contactsMatched: 0,
+      contactsStayedFullSession: 0,
+      unmatched: [] as string[],
+    };
+
+    for (const a of attendees) {
+      await query(
+        `INSERT INTO zoom_attendance
+           (webinar_id, email, join_time, leave_time, duration_minutes, workshop_cohort)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (webinar_id, email) DO UPDATE SET
+           join_time = COALESCE(EXCLUDED.join_time, zoom_attendance.join_time),
+           leave_time = COALESCE(EXCLUDED.leave_time, zoom_attendance.leave_time),
+           duration_minutes = GREATEST(EXCLUDED.duration_minutes, zoom_attendance.duration_minutes),
+           workshop_cohort = COALESCE(EXCLUDED.workshop_cohort, zoom_attendance.workshop_cohort)`,
+        [webinarId, a.email, a.join_time, a.leave_time, a.duration_minutes, cohort],
+      );
+      results.attendeesImported++;
+
+      const contactResult = await query(
+        `SELECT id FROM contacts WHERE LOWER(email) = $1 LIMIT 1`,
+        [a.email],
+      );
+      const contact = contactResult.rows[0];
+      if (contact) {
+        const stayedFull = a.duration_minutes >= fullSessionMinutes;
+        if (stayedFull) results.contactsStayedFullSession++;
+        await query(
+          `UPDATE contacts SET
+             attended_workshop = true,
+             attended_full_session = $1 OR attended_full_session,
+             attended_minutes = GREATEST(COALESCE(attended_minutes, 0), $2)
+           WHERE id = $3`,
+          [stayedFull, a.duration_minutes, contact.id],
+        );
+        await query(
+          `UPDATE zoom_attendance SET matched_contact_id = $1 WHERE webinar_id = $2 AND email = $3`,
+          [contact.id, webinarId, a.email],
+        );
+        results.contactsMatched++;
+      } else {
+        results.unmatched.push(a.email);
+      }
+    }
+
+    res.json({
+      ok: true,
+      parsed: attendees.length,
+      ...results,
+      preview: attendees.slice(0, 3),
+    });
+  } catch (err: any) {
+    console.error('Zoom CSV import failed:', err);
+    res.status(500).json({ error: err?.message || 'Zoom CSV import failed' });
   }
 });
 

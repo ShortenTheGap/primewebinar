@@ -25,7 +25,8 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.text({ type: ['text/csv', 'text/plain'], limit: '10mb' }));
 
 // Serve static files from the Vite build output
 // In production (dist/server/index.js), client files are at ../client
