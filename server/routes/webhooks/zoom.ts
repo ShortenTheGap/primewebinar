@@ -76,7 +76,7 @@ router.post('/', (req: Request, res: Response) => {
   }
 });
 
-async function processParticipantLeft(payload: Record<string, any>): Promise<void> {
+export async function processParticipantLeft(payload: Record<string, any>): Promise<void> {
   const participant = payload?.object?.participant || {};
   const webinarObj = payload?.object || {};
 

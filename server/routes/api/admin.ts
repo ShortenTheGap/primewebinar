@@ -2,6 +2,7 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { parse as parseCsv } from 'csv-parse/sync';
 import { query } from '../../lib/db.js';
 import { processGhlEvent } from '../webhooks/ghl.js';
+import { processParticipantLeft } from '../webhooks/zoom.js';
 
 const router = Router();
 
@@ -631,6 +632,72 @@ router.post('/simulate-ghl', async (req: Request, res: Response) => {
     }
     await processGhlEvent(event, body);
     res.json({ ok: true, event, body });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Simulate failed' });
+  }
+});
+
+/**
+ * POST /api/admin/simulate-zoom
+ * Run a fake Zoom participant_left event through the real handler —
+ * verifies the full Zoom flow (DB upsert, contact matching, attended flags)
+ * works without needing a live webinar.
+ *
+ * Body:
+ * {
+ *   "email": "test@example.com",
+ *   "webinar_id": "999888777",           // any string, used as the attendance row key
+ *   "duration_minutes": 65,              // how long they "stayed"
+ *   "join_time": "2026-04-30T14:00:00Z", // optional — auto-generated if omitted
+ *   "leave_time": "2026-04-30T15:05:00Z" // optional
+ * }
+ */
+router.post('/simulate-zoom', async (req: Request, res: Response) => {
+  try {
+    const { email, webinar_id, duration_minutes, join_time, leave_time } = req.body || {};
+    if (!email || !webinar_id) {
+      res.status(400).json({ error: 'Body must include email and webinar_id' });
+      return;
+    }
+    const duration = Number(duration_minutes) || 0;
+    const now = new Date();
+    const fakeJoin = join_time || new Date(now.getTime() - duration * 60_000).toISOString();
+    const fakeLeave = leave_time || now.toISOString();
+
+    const payload = {
+      object: {
+        id: webinar_id,
+        participant: {
+          email,
+          join_time: fakeJoin,
+          leave_time: fakeLeave,
+        },
+      },
+    };
+
+    await processParticipantLeft(payload);
+
+    // Report back what we stored so the user can verify
+    const zoomRow = await query(
+      `SELECT webinar_id, email, duration_minutes, matched_contact_id
+       FROM zoom_attendance WHERE webinar_id = $1 AND email = $2`,
+      [String(webinar_id), email],
+    );
+    const contactRow = await query(
+      `SELECT email, attended_workshop, attended_full_session, attended_minutes
+       FROM contacts WHERE email = $1`,
+      [email],
+    );
+
+    res.json({
+      ok: true,
+      simulated: payload,
+      zoom_attendance: zoomRow.rows[0] || null,
+      contact: contactRow.rows[0] || null,
+      note: contactRow.rows.length === 0
+        ? 'No matching contact in the contacts table — the attendance row was stored but not linked. Real webhooks will behave the same way for guest attendees.'
+        : 'Contact matched and attendance flags updated.',
+    });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || 'Simulate failed' });
   }
