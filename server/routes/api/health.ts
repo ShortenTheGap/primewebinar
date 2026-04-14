@@ -10,6 +10,10 @@ const router = Router();
 router.get('/', async (_req: Request, res: Response) => {
   const status: any = {
     hasDbUrl: !!process.env.DATABASE_URL,
+    hasAdminToken: !!process.env.ADMIN_TOKEN,
+    hasGhlSecret: !!process.env.GHL_WEBHOOK_SECRET,
+    hasZoomSecret: !!process.env.ZOOM_WEBHOOK_SECRET,
+    hasMetaToken: !!process.env.META_ACCESS_TOKEN,
     dataSource: process.env.VITE_DATA_SOURCE || 'unset',
     time: new Date().toISOString(),
   };

@@ -23,17 +23,40 @@ function verifyZoomSignature(req: Request): boolean {
   }
 }
 
+// Also accept GET/HEAD so Zoom's initial connectivity probe (if any) works
+router.get('/', (_req: Request, res: Response) => {
+  res.json({ ok: true, endpoint: 'zoom-webhook' });
+});
+
 router.post('/', (req: Request, res: Response) => {
+  console.log('[zoom-webhook] POST received', {
+    event: req.body?.event,
+    hasPayload: !!req.body?.payload,
+    bodyKeys: req.body ? Object.keys(req.body) : [],
+    hasSecret: !!process.env.ZOOM_WEBHOOK_SECRET,
+  });
+
   // Handle Zoom URL validation challenge
   if (req.body?.event === 'endpoint.url_validation') {
     const plainToken = req.body.payload?.plainToken;
     const secret = process.env.ZOOM_WEBHOOK_SECRET || '';
+
+    if (!secret) {
+      console.error('[zoom-webhook] validation failed: ZOOM_WEBHOOK_SECRET is not set');
+      res.status(500).json({ error: 'Server missing ZOOM_WEBHOOK_SECRET' });
+      return;
+    }
+    if (!plainToken) {
+      console.error('[zoom-webhook] validation failed: no plainToken in payload');
+      res.status(400).json({ error: 'Missing plainToken' });
+      return;
+    }
+
     const hmac = crypto.createHmac('sha256', secret);
     hmac.update(plainToken);
-    res.status(200).json({
-      plainToken,
-      encryptedToken: hmac.digest('hex'),
-    });
+    const encryptedToken = hmac.digest('hex');
+    console.log('[zoom-webhook] validation OK — responding');
+    res.status(200).json({ plainToken, encryptedToken });
     return;
   }
 
