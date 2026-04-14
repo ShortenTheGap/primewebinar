@@ -30,7 +30,7 @@ router.use(requireAdminToken);
 router.get('/cohorts', async (_req: Request, res: Response) => {
   try {
     const result = await query(
-      `SELECT id, workshop_date, label, is_active, created_at
+      `SELECT id, workshop_date, label, is_active, zoom_webinar_id, created_at
        FROM cohorts ORDER BY workshop_date DESC`,
     );
     res.json({ cohorts: result.rows });
@@ -41,28 +41,25 @@ router.get('/cohorts', async (_req: Request, res: Response) => {
 
 /**
  * POST /api/admin/cohorts
- * Body: { cohorts: [{ workshop_date: "YYYY-MM-DD", label?: string }] }
- *   or: { workshop_date: "YYYY-MM-DD", label?: string }  (single)
- * Upserts by workshop_date; existing rows are left alone.
+ * Body: { cohorts: [{ workshop_date, label?, zoom_webinar_id? }] }
+ *   or: { workshop_date, label?, zoom_webinar_id? }  (single)
+ * Upserts by workshop_date. If a row already exists, non-null values in the
+ * payload update the existing row (so you can add a zoom_webinar_id later).
  */
 router.post('/cohorts', async (req: Request, res: Response) => {
   try {
     const body = req.body;
-    const items: Array<{ workshop_date: string; label?: string }> = Array.isArray(body?.cohorts)
-      ? body.cohorts
-      : body?.workshop_date
-        ? [body]
-        : [];
+    const items: Array<{ workshop_date: string; label?: string; zoom_webinar_id?: string }> =
+      Array.isArray(body?.cohorts) ? body.cohorts : body?.workshop_date ? [body] : [];
 
     if (items.length === 0) {
       res.status(400).json({
-        error: 'Provide either { workshop_date, label } or { cohorts: [{ workshop_date, label }] }',
+        error: 'Provide { workshop_date, label?, zoom_webinar_id? } or a { cohorts: [...] } array',
       });
       return;
     }
 
-    const inserted: string[] = [];
-    const skipped: string[] = [];
+    const touched: Array<{ workshop_date: string; action: 'inserted' | 'updated' }> = [];
 
     for (const item of items) {
       if (!item.workshop_date || !/^\d{4}-\d{2}-\d{2}$/.test(item.workshop_date)) {
@@ -70,23 +67,26 @@ router.post('/cohorts', async (req: Request, res: Response) => {
         return;
       }
       const label = item.label || formatDefaultLabel(item.workshop_date);
+      const zoomId = item.zoom_webinar_id ? String(item.zoom_webinar_id).replace(/\s+/g, '') : null;
+
       const result = await query(
-        `INSERT INTO cohorts (workshop_date, label)
-         VALUES ($1, $2)
-         ON CONFLICT (workshop_date) DO NOTHING
-         RETURNING workshop_date`,
-        [item.workshop_date, label],
+        `INSERT INTO cohorts (workshop_date, label, zoom_webinar_id)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (workshop_date) DO UPDATE SET
+           label = EXCLUDED.label,
+           zoom_webinar_id = COALESCE(EXCLUDED.zoom_webinar_id, cohorts.zoom_webinar_id)
+         RETURNING workshop_date, (xmax = 0) AS inserted`,
+        [item.workshop_date, label, zoomId],
       );
-      if (result.rowCount && result.rowCount > 0) {
-        inserted.push(item.workshop_date);
-      } else {
-        skipped.push(item.workshop_date);
-      }
+      touched.push({
+        workshop_date: item.workshop_date,
+        action: result.rows[0]?.inserted ? 'inserted' : 'updated',
+      });
     }
 
-    res.json({ inserted, skipped, totalRequested: items.length });
+    res.json({ totalRequested: items.length, results: touched });
   } catch (err: any) {
-    res.status(500).json({ error: err?.message || 'Failed to insert cohorts' });
+    res.status(500).json({ error: err?.message || 'Failed to upsert cohorts' });
   }
 });
 

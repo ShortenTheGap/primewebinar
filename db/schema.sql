@@ -87,3 +87,5 @@ CREATE INDEX IF NOT EXISTS idx_zoom_attendance_email ON zoom_attendance(email);
 -- Migrations (idempotent ALTERs for fields added after initial schema)
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS attended_full_session BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS attended_minutes INTEGER;
+ALTER TABLE cohorts ADD COLUMN IF NOT EXISTS zoom_webinar_id TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cohorts_zoom_webinar_id ON cohorts(zoom_webinar_id) WHERE zoom_webinar_id IS NOT NULL;

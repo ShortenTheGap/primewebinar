@@ -80,27 +80,50 @@ export async function processParticipantLeft(payload: Record<string, any>): Prom
   const participant = payload?.object?.participant || {};
   const webinarObj = payload?.object || {};
 
-  const email = participant.email as string;
+  const email = (participant.email as string || '').toLowerCase().trim();
   const joinTime = participant.join_time as string;
   const leaveTime = participant.leave_time as string;
   const webinarId = String(webinarObj.id);
 
+  if (!email || !webinarId) {
+    console.log('[zoom] skipping: missing email or webinar_id');
+    return;
+  }
+
+  // Only process events for webinars we've explicitly registered as a
+  // workshop cohort. This filters out 1:1 calls, team meetings, and
+  // unrelated webinars on the same Zoom account.
+  const cohortLookup = await query(
+    `SELECT workshop_date FROM cohorts WHERE zoom_webinar_id = $1 LIMIT 1`,
+    [webinarId],
+  );
+  if (cohortLookup.rows.length === 0) {
+    console.log(`[zoom] ignoring event for unregistered webinar ${webinarId} (${email})`);
+    return;
+  }
+  const workshopCohort = cohortLookup.rows[0].workshop_date;
+
   const durationMs = new Date(leaveTime).getTime() - new Date(joinTime).getTime();
   const durationMinutes = Math.round(durationMs / 60000);
 
-  // Upsert into zoom_attendance
+  // Upsert into zoom_attendance (with cohort linkage)
   await query(
-    `INSERT INTO zoom_attendance (webinar_id, email, join_time, leave_time, duration_minutes)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO zoom_attendance
+       (webinar_id, email, join_time, leave_time, duration_minutes, workshop_cohort)
+     VALUES ($1, $2, $3, $4, $5, $6)
      ON CONFLICT (webinar_id, email) DO UPDATE SET
        join_time = EXCLUDED.join_time,
        leave_time = EXCLUDED.leave_time,
-       duration_minutes = EXCLUDED.duration_minutes`,
-    [webinarId, email, joinTime, leaveTime, durationMinutes],
+       duration_minutes = GREATEST(EXCLUDED.duration_minutes, zoom_attendance.duration_minutes),
+       workshop_cohort = EXCLUDED.workshop_cohort`,
+    [webinarId, email, joinTime, leaveTime, durationMinutes, workshopCohort],
   );
 
-  // Match to contacts by email
-  const result = await query(`SELECT id FROM contacts WHERE email = $1 LIMIT 1`, [email]);
+  // Match to contacts by email (case-insensitive)
+  const result = await query(
+    `SELECT id FROM contacts WHERE LOWER(email) = $1 LIMIT 1`,
+    [email],
+  );
   const contact = result.rows[0];
 
   if (contact) {
@@ -112,8 +135,8 @@ export async function processParticipantLeft(payload: Record<string, any>): Prom
          attended_workshop = true,
          attended_full_session = $1 OR attended_full_session,
          attended_minutes = GREATEST(COALESCE(attended_minutes, 0), $2)
-       WHERE email = $3`,
-      [stayedFullSession, durationMinutes, email],
+       WHERE id = $3`,
+      [stayedFullSession, durationMinutes, contact.id],
     );
     await query(
       `UPDATE zoom_attendance SET matched_contact_id = $1 WHERE webinar_id = $2 AND email = $3`,
