@@ -110,6 +110,92 @@ router.delete('/cohorts/:workshop_date', async (req: Request, res: Response) => 
 });
 
 /**
+ * POST /api/admin/import-ghl-export
+ * Accepts the raw GHL contact export format (an object keyed by GHL
+ * contact ID with "First Name" / "Email" / "Tags" / etc fields) and
+ * imports those contacts as workshop buyers.
+ *
+ * Body:
+ * {
+ *   "workshop_cohort": "2026-04-02",     // required
+ *   "lead_source": "Email Kit",           // optional — applied to all rows
+ *   "ghlExport": {
+ *     "<ghl_contact_id>": { "Email": "...", "Tags": "...", ... },
+ *     ...
+ *   }
+ * }
+ */
+router.post('/import-ghl-export', async (req: Request, res: Response) => {
+  try {
+    const cohort = req.body?.workshop_cohort as string;
+    const leadSource = (req.body?.lead_source as string) || null;
+    const ghlExport = req.body?.ghlExport;
+
+    if (!cohort || !/^\d{4}-\d{2}-\d{2}$/.test(cohort)) {
+      res.status(400).json({ error: 'workshop_cohort required in YYYY-MM-DD format' });
+      return;
+    }
+    if (!ghlExport || typeof ghlExport !== 'object' || Array.isArray(ghlExport)) {
+      res.status(400).json({ error: 'ghlExport must be an object keyed by GHL contact ID' });
+      return;
+    }
+
+    const entries = Object.entries(ghlExport as Record<string, any>);
+    if (entries.length === 0) {
+      res.status(400).json({ error: 'ghlExport is empty' });
+      return;
+    }
+
+    const results = { inserted: 0, updated: 0, skipped: [] as string[] };
+
+    for (const [ghlId, raw] of entries) {
+      // GHL export uses capitalized field names with spaces — normalize case-insensitively
+      const email = pickField(raw, ['Email', 'email'])?.toString().trim().toLowerCase();
+      if (!email) {
+        results.skipped.push(ghlId);
+        continue;
+      }
+
+      const result = await query(
+        `INSERT INTO contacts (
+           email, ghl_contact_id, workshop_cohort, lead_source,
+           is_workshop_buyer
+         ) VALUES ($1, $2, $3, $4, true)
+         ON CONFLICT (ghl_contact_id) DO UPDATE SET
+           email = EXCLUDED.email,
+           workshop_cohort = COALESCE(EXCLUDED.workshop_cohort, contacts.workshop_cohort),
+           lead_source = COALESCE(EXCLUDED.lead_source, contacts.lead_source),
+           is_workshop_buyer = true
+         RETURNING (xmax = 0) AS inserted`,
+        [email, ghlId, cohort, leadSource],
+      );
+      if (result.rows[0]?.inserted) results.inserted++;
+      else results.updated++;
+    }
+
+    res.json({ ok: true, totalProcessed: entries.length, ...results });
+  } catch (err: any) {
+    console.error('GHL export import failed:', err);
+    res.status(500).json({ error: err?.message || 'GHL export import failed' });
+  }
+});
+
+function pickField(obj: any, names: string[]): string | null {
+  if (!obj || typeof obj !== 'object') return null;
+  for (const n of names) {
+    if (obj[n] !== undefined && obj[n] !== null && obj[n] !== '') return obj[n];
+  }
+  // Case-insensitive fallback
+  const lowered: Record<string, any> = {};
+  for (const k of Object.keys(obj)) lowered[k.toLowerCase()] = obj[k];
+  for (const n of names) {
+    const v = lowered[n.toLowerCase()];
+    if (v !== undefined && v !== null && v !== '') return v;
+  }
+  return null;
+}
+
+/**
  * POST /api/admin/import-contacts
  * Bulk upsert of real contacts with full funnel state. For backfilling
  * historical cohorts that happened before webhooks were wired up.
