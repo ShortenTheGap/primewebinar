@@ -160,29 +160,37 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
   const { contacts, adSpend, zoomAttendance, cohorts } = data;
 
   // ── Funnel Volume raw counts ───────────────────────────────────────
-  const purchases = contacts.filter((c) => c.is_workshop_buyer);
-  const attendees = contacts.filter((c) => c.attended_workshop === true);
-  const deposited = contacts.filter((c) => c.deposit_paid);
-  const callsBooked = contacts.filter((c) => c.call_booked);
-  const callsCompleted = contacts.filter((c) => c.call_completed);
-  const converted = contacts.filter((c) => c.converted_to_pe);
+  // The business funnel (Workshop Purchases → Converted) excludes guests,
+  // since guests didn't pay for a ticket and aren't part of the sales pipeline.
+  // Guest attendance is still shown as an operational metric on the
+  // Attendees Showed card (total + breakdown).
+  const paidBuyers = contacts.filter((c) => c.is_workshop_buyer && !c.is_guest);
+  const attendeesAll = contacts.filter((c) => c.attended_workshop === true);
+  const paidAttendeesRows = attendeesAll.filter((c) => !c.is_guest);
+  const guestAttendeesRows = attendeesAll.filter((c) => c.is_guest === true);
 
-  const purchaseCount = purchases.length;
-  const attendeeCount = attendees.length;
+  // Downstream funnel stages: filter to paid only. A guest who somehow
+  // deposits / books a call would still hit these filters via is_guest=false
+  // on those records — but in practice, if a guest pays a deposit they've
+  // become a paid contact.
+  const deposited = contacts.filter((c) => c.deposit_paid && !c.is_guest);
+  const callsBooked = contacts.filter((c) => c.call_booked && !c.is_guest);
+  const callsCompleted = contacts.filter((c) => c.call_completed && !c.is_guest);
+  const converted = contacts.filter((c) => c.converted_to_pe && !c.is_guest);
+
+  const purchaseCount = paidBuyers.length; // paid only (Workshop Purchases card)
+  const attendeeCount = attendeesAll.length; // total (Attendees Showed card)
+  const paidAttendees = paidAttendeesRows.length;
+  const guestAttendees = guestAttendeesRows.length;
   const depositedCount = deposited.length;
   const bookedCount = callsBooked.length;
   const completedCount = callsCompleted.length;
   const convertedCount = converted.length;
 
-  // Paid vs guest split — guests don't contribute to workshop revenue but
-  // do count in attendance / funnel metrics.
-  const paidPurchases = purchases.filter((c) => !c.is_guest).length;
-  const guestPurchases = purchases.filter((c) => c.is_guest === true).length;
-  const paidAttendees = attendees.filter((c) => !c.is_guest).length;
-  const guestAttendees = attendees.filter((c) => c.is_guest === true).length;
-
   // ── Rates ──────────────────────────────────────────────────────────
-  const showRate = safeDivide(attendeeCount, purchaseCount) * 100;
+  // Use paid-attendees for show rate so it's a clean business metric
+  // (of the people who paid, how many showed up?)
+  const showRate = safeDivide(paidAttendees, purchaseCount) * 100;
   const depositRate = safeDivide(depositedCount, purchaseCount) * 100;
   const callBookRate = safeDivide(bookedCount, depositedCount) * 100;
   const callShowRate = safeDivide(completedCount, bookedCount) * 100;
@@ -205,7 +213,7 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
     return s;
   }, 0);
   // Only paid buyers contribute the $97 ticket revenue; guests are free
-  const workshopTicketRevenue = paidPurchases * 97;
+  const workshopTicketRevenue = purchaseCount * 97;
   const revenueCollected = workshopTicketRevenue + depositedCount * 500 + peInitialPayments;
 
   // 12-month LTV = annualized monthly + upfront cash from paid-in-full.
@@ -240,9 +248,9 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
       : 0;
 
   // ── Funnel Volume KPI cards ────────────────────────────────────────
-  const purchasesSub = guestPurchases > 0
-    ? `${fmtCurrencyExact(workshopTicketRevenue)} collected · ${paidPurchases} paid / ${guestPurchases} guest`
-    : `${fmtCurrencyExact(workshopTicketRevenue)} collected`;
+  // Workshop Purchases is strictly paid tickets — guests don't inflate this
+  // business metric. Attendees Showed stays total + paid/guest breakdown
+  // for operational visibility (total people in the room).
   const attendeesSub = guestAttendees > 0
     ? `↑${fmtPct(showRate)} show rate · ${paidAttendees} paid / ${guestAttendees} guest`
     : `↑${fmtPct(showRate)} show rate`;
@@ -251,7 +259,7 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
     {
       label: 'Workshop Purchases',
       value: fmtInt(purchaseCount),
-      sub: purchasesSub,
+      sub: `${fmtCurrencyExact(workshopTicketRevenue)} collected`,
     },
     {
       label: 'Attendees Showed',
@@ -305,7 +313,8 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
   ];
 
   // ── Conversion Funnel stages ───────────────────────────────────────
-  const funnelCounts = [purchaseCount, attendeeCount, depositedCount, bookedCount, completedCount, convertedCount];
+  // Funnel uses paid-only counts throughout (consistent with Workshop Purchases KPI)
+  const funnelCounts = [purchaseCount, paidAttendees, depositedCount, bookedCount, completedCount, convertedCount];
   const funnelLabels = ['Purchased Workshop', 'Attended', 'Deposit Paid', 'Call Booked', 'Call Completed', 'Closed PE Member'];
 
   const funnelStages = funnelLabels.map((label, i) => {
@@ -320,7 +329,7 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
   const monthlyCount = converted.filter((c) => c.pe_payment_plan === 'monthly').length;
 
   const revenueWaterfall = [
-    { label: `$97 Workshop Sales (${paidPurchases} paid)`, value: fmtCurrencyExact(workshopTicketRevenue) },
+    { label: `$97 Workshop Sales (${purchaseCount})`, value: fmtCurrencyExact(workshopTicketRevenue) },
     { label: `$500 Deposits (${depositedCount})`, value: fmtCurrencyExact(depositedCount * 500) },
     ...(paidInFullCount > 0
       ? [{ label: `PE Paid-in-Full (${paidInFullCount})`, value: fmtCurrencyExact(paidInFullCount * 30000) }]
