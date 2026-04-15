@@ -182,7 +182,11 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
 
   // ── Cost & Revenue ─────────────────────────────────────────────────
   const totalAdSpend = adSpend.reduce((s, row) => s + Number(row.spend), 0);
+
+  // MRR is strictly recurring. Paid-in-full customers have 0 MRR (already
+  // paid the full year upfront). Only monthly subscribers contribute.
   const mrrAdded = converted.reduce((s, c) => s + (c.mrr_value || 0), 0);
+
   // PE initial payments: $30k for paid-in-full, $2k for monthly (deposit $500
   // already counted below). If pe_initial_payment is explicitly stored, use it.
   const peInitialPayments = converted.reduce((s, c) => {
@@ -190,10 +194,21 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
     if (!Number.isNaN(n) && n > 0) return s + n;
     if (c.pe_payment_plan === 'paid_in_full') return s + 30000;
     if (c.pe_payment_plan === 'monthly') return s + 2000;
-    return s; // no plan info — don't double-count
+    return s;
   }, 0);
   const revenueCollected = purchaseCount * 97 + depositedCount * 500 + peInitialPayments;
-  const projected12moLTV = mrrAdded * 12;
+
+  // 12-month LTV = annualized monthly + upfront cash from paid-in-full.
+  // Both plans are $30k/year value so a paid-in-full contributes 30k to LTV
+  // directly while a monthly contributes mrr × 12 = 30k. Contacts without a
+  // plan field fall back to mrr × 12.
+  const projected12moLTV = converted.reduce((s, c) => {
+    if (c.pe_payment_plan === 'paid_in_full') {
+      const n = Number(c.pe_initial_payment);
+      return s + (Number.isNaN(n) || n <= 0 ? 30000 : n);
+    }
+    return s + (c.mrr_value || 0) * 12;
+  }, 0);
   const costPerBuy = safeDivide(totalAdSpend, purchaseCount);
   const costPerClose = safeDivide(totalAdSpend, convertedCount);
 

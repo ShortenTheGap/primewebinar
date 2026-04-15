@@ -154,9 +154,18 @@ export async function processGhlEvent(event: string, body: Record<string, any>):
 
     case 'contact.converted': {
       const { email, ghl_contact_id, workshop_cohort, mrr_value, assigned_rep, payment_plan, initial_payment } = body;
-      const mrr = Number(mrr_value) > 0 ? Math.round(Number(mrr_value)) : 2500;
-      // Default initial_payment based on plan when not explicitly provided
       const plan = payment_plan === 'paid_in_full' || payment_plan === 'monthly' ? payment_plan : null;
+
+      // MRR is 2500 for monthly subscribers (recurring). Paid-in-full has NO
+      // monthly recurring revenue — they paid the full annual value upfront.
+      // If an explicit mrr_value is passed we honor it; otherwise default
+      // based on plan.
+      const mrrProvided = mrr_value !== undefined && mrr_value !== null && mrr_value !== '';
+      const mrr = mrrProvided
+        ? Math.max(0, Math.round(Number(mrr_value)))
+        : (plan === 'paid_in_full' ? 0 : 2500);
+
+      // Default initial_payment based on plan when not explicitly provided
       const initPay = Number(initial_payment) > 0
         ? Number(initial_payment)
         : (plan === 'paid_in_full' ? 30000 : plan === 'monthly' ? 2000 : null);
