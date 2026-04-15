@@ -538,16 +538,21 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
 
   const cohortRows = Array.from(cohortContactGroups.entries())
     .map(([date, group]) => {
-      const p = group.filter((c) => c.is_workshop_buyer).length;
-      const a = group.filter((c) => c.attended_workshop === true).length;
-      const d = group.filter((c) => c.deposit_paid).length;
-      const cl = group.filter((c) => c.call_completed).length;
-      const closed = group.filter((c) => c.converted_to_pe).length;
-      const mrr = group.filter((c) => c.converted_to_pe).reduce((s, c) => s + (c.mrr_value || 0), 0);
+      // Business metrics: exclude guests from all counts (same convention
+      // as the rest of the dashboard).
+      const paidGroup = group.filter((c) => !c.is_guest);
+      const attendedAll = group.filter((c) => c.attended_workshop === true);
 
-      // Top source by purchase count
+      const p = paidGroup.filter((c) => c.is_workshop_buyer).length;
+      const a = paidGroup.filter((c) => c.attended_workshop === true).length;
+      const d = paidGroup.filter((c) => c.deposit_paid).length;
+      const cl = paidGroup.filter((c) => c.call_completed).length;
+      const closed = paidGroup.filter((c) => c.converted_to_pe).length;
+      const mrr = paidGroup.filter((c) => c.converted_to_pe).reduce((s, c) => s + (c.mrr_value || 0), 0);
+
+      // Top source by purchase count (paid only)
       const srcCounts = new Map<string, number>();
-      for (const c of group) {
+      for (const c of paidGroup) {
         if (c.is_workshop_buyer && c.lead_source) {
           srcCounts.set(c.lead_source, (srcCounts.get(c.lead_source) || 0) + 1);
         }
