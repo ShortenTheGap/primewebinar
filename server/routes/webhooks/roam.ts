@@ -131,12 +131,13 @@ router.get('/', (_req: Request, res: Response) => {
 });
 
 router.post('/', async (req: Request, res: Response) => {
-  // Log EVERY header so we can see exactly how ro.am authenticates
-  console.log('[roam-webhook] POST received', {
+  // Single-line JSON log so Railway captures it as one entry (easier to grep)
+  console.log(JSON.stringify({
+    marker: 'roam-webhook-received',
     allHeaders: req.headers,
     bodyKeys: req.body ? Object.keys(req.body) : [],
     bodyPreview: JSON.stringify(req.body || {}).slice(0, 1500),
-  });
+  }));
 
   // Try several common token header conventions
   const tokenCandidates = [
