@@ -118,6 +118,35 @@ export async function processGhlEvent(event: string, body: Record<string, any>):
       break;
     }
 
+    case 'contact.call_completed': {
+      // Manual / GHL-driven mark that a call happened. Optionally accepts a
+      // disposition (sold | follow_up | not_a_fit | no_show) and assigned_rep.
+      // Same identity-fields pattern as deposit_paid / call_booked.
+      const { email, ghl_contact_id, workshop_cohort, disposition, assigned_rep } = body;
+      if (!email && !ghl_contact_id) {
+        console.warn('[ghl] call_completed: no email or ghl_contact_id, skipping');
+        break;
+      }
+      const validDispositions = new Set(['sold', 'follow_up', 'not_a_fit', 'no_show']);
+      const dispo = disposition && validDispositions.has(disposition) ? disposition : null;
+
+      const result = await query(
+        `UPDATE contacts SET
+           call_completed = true,
+           call_completed_at = COALESCE(call_completed_at, NOW()),
+           call_disposition = COALESCE($4::call_disposition_type, call_disposition),
+           assigned_rep = COALESCE($5, assigned_rep),
+           workshop_cohort = COALESCE($3::date, workshop_cohort)
+         WHERE ghl_contact_id = $1 OR LOWER(email) = LOWER($2)
+         RETURNING id`,
+        [ghl_contact_id || null, email || null, workshop_cohort || null, dispo, assigned_rep || null],
+      );
+      if (result.rowCount === 0) {
+        console.warn(`[ghl] call_completed: no contact matched (ghl_id=${ghl_contact_id}, email=${email})`);
+      }
+      break;
+    }
+
     case 'contact.tag_added': {
       const { email, tag } = body;
 
