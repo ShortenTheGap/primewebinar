@@ -35,6 +35,13 @@ export default function TopBar({ cohorts, selectedCohort, onCohortChange, darkMo
             ))}
           </select>
 
+          <a
+            href="/admin"
+            className="text-xs text-muted hover:text-white transition-colors"
+          >
+            Admin
+          </a>
+
           <button
             onClick={onToggleDark}
             className="w-8 h-8 flex items-center justify-center rounded-md border border-border hover:bg-card transition-colors"
