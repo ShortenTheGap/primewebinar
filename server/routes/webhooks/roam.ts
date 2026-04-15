@@ -259,24 +259,37 @@ router.post('/', async (req: Request, res: Response) => {
 
 /**
  * Router for different ro.am event types. Currently handles:
- *   lobby:booked / call:booked / booking:created          → mark call_booked
- *   recording.saved / transcript.saved / *ended / *completed / onair.event.updated
- *                                                         → mark call_completed
- *   (anything else) → log + ignore
+ *   lobby:booked / call:booked / booking:created                → handleBooked
+ *   recording.saved / transcript.saved / *ended / *completed    → handleCallEnded
+ *   transcript.started / *started / *created                    → log + ignore
+ *                                                                 (useful signal but
+ *                                                                  not the same as completion)
+ *   (anything else)                                             → log + ignore
  */
 async function processRoamEvent(eventType: string, body: any): Promise<void> {
   const et = eventType.toLowerCase();
 
-  if (et.includes('booked') || et.includes('booking:created') || et.includes('scheduled')) {
+  // Booked events first
+  if (
+    et.includes('booked') ||
+    et.includes('booking:created') ||
+    (et.includes('scheduled') && !et.includes('started'))
+  ) {
     await handleBooked(body);
     return;
   }
-  // ro.am uses "recording.saved" and "transcript.saved" as signals that a call
-  // actually happened (either is a strong proxy for call completion).
-  // Also catch generic *:ended / *:completed / *:finished / onair:updated.
+
+  // Explicitly SKIP start events — they fire mid-call, not at completion
+  if (et.endsWith('.started') || et.endsWith(':started')) {
+    console.log(`[roam-webhook] informational event: ${eventType} — not acting on this`);
+    return;
+  }
+
+  // "Saved" events fire after the call ends (recording/transcript finalized).
+  // Also catch explicit *ended / *completed / *finished.
   if (
-    et.includes('recording') ||
-    et.includes('transcript') ||
+    et.endsWith('.saved') ||
+    et.endsWith(':saved') ||
     et.includes('ended') ||
     et.includes('completed') ||
     et.includes('finished') ||
@@ -285,6 +298,7 @@ async function processRoamEvent(eventType: string, body: any): Promise<void> {
     await handleCallEnded(body);
     return;
   }
+
   console.log(`[roam-webhook] unhandled event type: ${eventType} — ignoring`);
 }
 
