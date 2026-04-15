@@ -76,6 +76,8 @@ export default function AdminView() {
   const [adEditCampaigns, setAdEditCampaigns] = useState<Set<string>>(new Set());
   const [adEditStart, setAdEditStart] = useState<string>('');
   const [campaignFilter, setCampaignFilter] = useState<string>('');
+  const [campaignRanFrom, setCampaignRanFrom] = useState<string>('');
+  const [campaignRanTo, setCampaignRanTo] = useState<string>('');
 
   async function loadCohorts() {
     if (!token) return;
@@ -172,12 +174,21 @@ export default function AdminView() {
     setAdEditCampaigns(next);
   }
 
-  function filteredCampaignIds(): string[] {
+  function matchesCampaignFilters(c: Campaign): boolean {
     const q = campaignFilter.trim().toLowerCase();
-    const src = q
-      ? campaigns.filter((c) => (c.campaign_name || '').toLowerCase().includes(q))
-      : campaigns;
-    return src.map((c) => c.campaign_id);
+    if (q && !(c.campaign_name || '').toLowerCase().includes(q)) return false;
+    // Date overlap: campaign ran any day within [from, to]
+    if (campaignRanFrom && (c.last_date || '') < campaignRanFrom) return false;
+    if (campaignRanTo && (c.first_date || '') > campaignRanTo) return false;
+    return true;
+  }
+
+  function filteredCampaignIds(): string[] {
+    return campaigns.filter(matchesCampaignFilters).map((c) => c.campaign_id);
+  }
+
+  function anyFilterActive(): boolean {
+    return !!(campaignFilter.trim() || campaignRanFrom || campaignRanTo);
   }
 
   function selectAllFiltered() {
@@ -464,10 +475,9 @@ export default function AdminView() {
                             <span className="text-[11px] text-muted">
                               {(() => {
                                 if (campaigns.length === 0) return 'No campaigns pulled yet — hit "Sync Meta Ads" up top';
-                                const q = campaignFilter.trim().toLowerCase();
-                                if (!q) return `${campaigns.length} total in ad account`;
-                                const n = campaigns.filter((c) => (c.campaign_name || '').toLowerCase().includes(q)).length;
-                                return `${n} of ${campaigns.length} match "${campaignFilter}"`;
+                                if (!anyFilterActive()) return `${campaigns.length} total in ad account`;
+                                const n = campaigns.filter(matchesCampaignFilters).length;
+                                return `${n} of ${campaigns.length} match filters`;
                               })()}
                             </span>
                           </div>
@@ -485,25 +495,50 @@ export default function AdminView() {
                                 onClick={selectAllFiltered}
                                 className="text-xs px-3 py-1.5 bg-teal/20 hover:bg-teal/30 text-teal border border-teal/40 rounded whitespace-nowrap"
                               >
-                                Select All{campaignFilter.trim() ? ' Filtered' : ''}
+                                Select All{anyFilterActive() ? ' Filtered' : ''}
                               </button>
                               <button
                                 type="button"
                                 onClick={clearFiltered}
                                 className="text-xs px-3 py-1.5 text-muted hover:text-white border border-border rounded whitespace-nowrap"
                               >
-                                Clear{campaignFilter.trim() ? ' Filtered' : ''}
+                                Clear{anyFilterActive() ? ' Filtered' : ''}
                               </button>
+                            </div>
+                          )}
+                          {campaigns.length > 0 && (
+                            <div className="flex items-center gap-2 mb-2">
+                              <label className="text-[10px] uppercase tracking-wider text-muted whitespace-nowrap">
+                                Ran between
+                              </label>
+                              <input
+                                type="date"
+                                value={campaignRanFrom}
+                                onChange={(e) => setCampaignRanFrom(e.target.value)}
+                                className="bg-[#141414] border border-border rounded px-2 py-1.5 text-sm"
+                              />
+                              <span className="text-xs text-muted">and</span>
+                              <input
+                                type="date"
+                                value={campaignRanTo}
+                                onChange={(e) => setCampaignRanTo(e.target.value)}
+                                className="bg-[#141414] border border-border rounded px-2 py-1.5 text-sm"
+                              />
+                              {(campaignRanFrom || campaignRanTo) && (
+                                <button
+                                  type="button"
+                                  onClick={() => { setCampaignRanFrom(''); setCampaignRanTo(''); }}
+                                  className="text-[11px] px-2 py-1 text-muted hover:text-white"
+                                >
+                                  clear dates
+                                </button>
+                              )}
                             </div>
                           )}
                           {campaigns.length > 0 && (
                             <div className="max-h-[280px] overflow-y-auto border border-border rounded">
                               {campaigns
-                                .filter((camp) => {
-                                  const q = campaignFilter.trim().toLowerCase();
-                                  if (!q) return true;
-                                  return (camp.campaign_name || '').toLowerCase().includes(q);
-                                })
+                                .filter(matchesCampaignFilters)
                                 .map((camp) => {
                                 const checked = adEditCampaigns.has(camp.campaign_id);
                                 return (
