@@ -66,7 +66,6 @@ export interface CohortRow {
   zoom_webinar_id?: string | null;
   ad_campaign_ids?: string[] | null;
   ad_attribution_start?: string | null;
-  include_all_ad_spend?: boolean | null;
 }
 
 export interface RawData {
@@ -75,6 +74,7 @@ export interface RawData {
   zoomAttendance: ZoomAttendanceRow[];
   cohorts: CohortRow[];
   selectedCohort?: string; // "all" or a YYYY-MM-DD workshop_date
+  includeAllAdSpend?: boolean; // dashboard toggle: when true, ROAS/CPB/etc use every campaign in the cohort date window, not just attributed ones
 }
 
 // ─── Formatting helpers ────────────────────────────────────────────────
@@ -174,6 +174,7 @@ function filterAttributedAdSpend(
   adSpend: AdSpendRow[],
   cohorts: CohortRow[],
   selectedCohort?: string,
+  includeAllAdSpend?: boolean,
 ): AdSpendRow[] {
   const applicable = selectedCohort && selectedCohort !== 'all'
     ? cohorts.filter((c) => c.workshop_date === selectedCohort)
@@ -188,9 +189,9 @@ function filterAttributedAdSpend(
       const end = c.workshop_date as unknown as string;
       if (start && rowDate < start) return false;
       if (end && rowDate > end) return false;
-      // include_all_ad_spend=true: any campaign in the window counts.
-      // Otherwise require an explicit campaign_id match.
-      if (c.include_all_ad_spend) return true;
+      // Dashboard-level override: count every campaign in the cohort window.
+      if (includeAllAdSpend) return true;
+      // Default: require the campaign to be explicitly attributed to this cohort.
       if (!c.ad_campaign_ids || c.ad_campaign_ids.length === 0) return false;
       return c.ad_campaign_ids.includes(row.campaign_id);
     });
@@ -198,11 +199,12 @@ function filterAttributedAdSpend(
 }
 
 export function computeDashboardMetrics(data: RawData): DashboardPayload {
-  const { contacts, zoomAttendance, cohorts, selectedCohort } = data;
+  const { contacts, zoomAttendance, cohorts, selectedCohort, includeAllAdSpend } = data;
   // Filter ad_spend by cohort attribution rules. ROAS / Cost-per-Buy / ad
   // performance all work off this filtered set so non-webinar campaigns
-  // never pollute the numbers.
-  const adSpend = filterAttributedAdSpend(data.adSpend, cohorts, selectedCohort);
+  // never pollute the numbers (unless the dashboard-level includeAllAdSpend
+  // toggle is on, in which case every campaign in the cohort window counts).
+  const adSpend = filterAttributedAdSpend(data.adSpend, cohorts, selectedCohort, includeAllAdSpend);
 
   // ── Funnel Volume raw counts ───────────────────────────────────────
   // The business funnel (Workshop Purchases → Converted) excludes guests,

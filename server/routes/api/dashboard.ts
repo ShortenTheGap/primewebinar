@@ -7,6 +7,7 @@ const router = Router();
 router.get('/', async (req: Request, res: Response) => {
   try {
     const cohort = (req.query.cohort as string) || 'all';
+    const includeAllAdSpend = req.query.includeAll === '1' || req.query.includeAll === 'true';
 
     // Fetch cohorts
     const cohortsResult = await query(
@@ -32,6 +33,7 @@ router.get('/', async (req: Request, res: Response) => {
       zoomAttendance: zoomResult.rows,
       cohorts: cohortsResult.rows,
       selectedCohort: cohort,
+      includeAllAdSpend,
     });
 
     res.json(payload);

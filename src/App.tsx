@@ -15,16 +15,17 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [cohort, setCohort] = useState('all');
   const [darkMode, setDarkMode] = useState(true);
+  const [includeAllAdSpend, setIncludeAllAdSpend] = useState(false);
 
   useEffect(() => {
     setError(null);
-    getDashboardData(cohort)
+    getDashboardData(cohort, includeAllAdSpend)
       .then(setData)
       .catch((err) => {
         console.error('Failed to load dashboard:', err);
         setError(err?.message || 'Failed to load dashboard data');
       });
-  }, [cohort]);
+  }, [cohort, includeAllAdSpend]);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode);
@@ -61,6 +62,8 @@ export default function App() {
         onCohortChange={setCohort}
         darkMode={darkMode}
         onToggleDark={() => setDarkMode(!darkMode)}
+        includeAllAdSpend={includeAllAdSpend}
+        onToggleIncludeAllAdSpend={() => setIncludeAllAdSpend(!includeAllAdSpend)}
       />
       <div className="max-w-[1440px] mx-auto px-4 sm:px-6 space-y-6 mt-6">
         <KPISection

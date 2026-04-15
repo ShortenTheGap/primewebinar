@@ -4,9 +4,19 @@ interface Props {
   onCohortChange: (v: string) => void;
   darkMode: boolean;
   onToggleDark: () => void;
+  includeAllAdSpend: boolean;
+  onToggleIncludeAllAdSpend: () => void;
 }
 
-export default function TopBar({ cohorts, selectedCohort, onCohortChange, darkMode, onToggleDark }: Props) {
+export default function TopBar({
+  cohorts,
+  selectedCohort,
+  onCohortChange,
+  darkMode,
+  onToggleDark,
+  includeAllAdSpend,
+  onToggleIncludeAllAdSpend,
+}: Props) {
   return (
     <header className="sticky top-0 z-50 bg-[#0f0f0f]/95 backdrop-blur border-b border-border">
       <div className="max-w-[1440px] mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
@@ -34,6 +44,34 @@ export default function TopBar({ cohorts, selectedCohort, onCohortChange, darkMo
               </option>
             ))}
           </select>
+
+          <button
+            type="button"
+            onClick={onToggleIncludeAllAdSpend}
+            title={
+              includeAllAdSpend
+                ? 'Showing ALL ad spend in cohort window. Click to use only attributed campaigns.'
+                : 'Showing only attributed campaigns. Click to include ALL ad spend in cohort window.'
+            }
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-md border text-xs transition-colors ${
+              includeAllAdSpend
+                ? 'bg-amber/10 border-amber/40 text-amber'
+                : 'bg-card border-border text-muted hover:text-white'
+            }`}
+          >
+            <span
+              className={`w-7 h-4 rounded-full relative transition-colors ${
+                includeAllAdSpend ? 'bg-amber/60' : 'bg-border'
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${
+                  includeAllAdSpend ? 'left-3.5' : 'left-0.5'
+                }`}
+              />
+            </span>
+            {includeAllAdSpend ? 'ALL ad spend' : 'Attributed only'}
+          </button>
 
           <a
             href="/admin"
