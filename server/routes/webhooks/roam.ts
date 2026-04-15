@@ -244,47 +244,68 @@ router.post('/', async (req: Request, res: Response) => {
   // Respond 200 fast so ro.am doesn't retry
   res.status(200).json({ received: true });
 
+  // Read event type from the roam-event-type header (or fall back to body.type / body.event)
+  const eventType =
+    (req.headers['roam-event-type'] as string | undefined) ||
+    req.body?.type ||
+    req.body?.event ||
+    'unknown';
+
   // Process asynchronously
-  processRoamEvent(req.body).catch((err) => {
+  processRoamEvent(eventType, req.body).catch((err) => {
     console.error('[roam-webhook] processing error:', err);
   });
 });
 
-async function processRoamEvent(body: any): Promise<void> {
+/**
+ * Router for different ro.am event types. Currently handles:
+ *   lobby:booked / call:booked / booking:created  → mark call_booked
+ *   lobby:ended  / call:ended  / meeting:ended    → mark call_completed
+ *   (anything else) → log + ignore
+ */
+async function processRoamEvent(eventType: string, body: any): Promise<void> {
+  const et = eventType.toLowerCase();
+
+  if (et.includes('booked') || et.includes('booking:created') || et.includes('scheduled')) {
+    await handleBooked(body);
+    return;
+  }
+  if (et.includes('ended') || et.includes('completed') || et.includes('finished')) {
+    await handleCallEnded(body);
+    return;
+  }
+  console.log(`[roam-webhook] unhandled event type: ${eventType} — ignoring`);
+}
+
+async function handleBooked(body: any): Promise<void> {
   const email = extractEmail(body);
   const cohort = extractCohort(body);
   const hostIds = extractHostIdentifiers(body);
 
   if (!email) {
-    console.warn('[roam-webhook] no email found in payload — full body logged above for debugging');
+    console.warn('[roam-webhook] booked: no email found in payload');
     return;
   }
 
-  // Filter 1: Only process bookings for specific ro.am host(s) if configured.
   if (!isAllowedHost(hostIds)) {
     console.log(
-      `[roam-webhook] SKIPPED — host not in allowlist. hosts=${JSON.stringify(hostIds)}, allow=${process.env.ROAM_ALLOWED_HOSTS || '(none)'}`,
+      `[roam-webhook] booked SKIPPED — host not in allowlist. hosts=${JSON.stringify(hostIds)}`,
     );
     return;
   }
 
-  // Filter 2: Only process emails that are known workshop buyers in our DB.
-  // (This prevents random booking emails from getting marked as call_booked.)
   const existing = await query(
     `SELECT id, is_workshop_buyer FROM contacts WHERE LOWER(email) = $1`,
     [email],
   );
-
   if (existing.rowCount === 0) {
-    console.log(`[roam-webhook] SKIPPED — no matching contact for email=${email} (not a workshop attendee)`);
+    console.log(`[roam-webhook] booked SKIPPED — no matching contact: ${email}`);
     return;
   }
   if (!existing.rows[0].is_workshop_buyer) {
-    console.log(`[roam-webhook] SKIPPED — contact exists but is not a workshop buyer: ${email}`);
+    console.log(`[roam-webhook] booked SKIPPED — not a workshop buyer: ${email}`);
     return;
   }
-
-  console.log(`[roam-webhook] processing booking: email=${email}, cohort=${cohort || 'inherit'}, hosts=${JSON.stringify(hostIds)}`);
 
   const result = await query(
     `UPDATE contacts SET
@@ -297,6 +318,94 @@ async function processRoamEvent(body: any): Promise<void> {
   );
 
   console.log(`[roam-webhook] marked call_booked for ${email} → cohort=${result.rows[0]?.workshop_cohort}`);
+}
+
+async function handleCallEnded(body: any): Promise<void> {
+  const email = extractEmail(body);
+  const hostIds = extractHostIdentifiers(body);
+  const durationMinutes = extractDurationMinutes(body);
+
+  if (!email) {
+    console.warn('[roam-webhook] call_ended: no email found in payload');
+    return;
+  }
+  if (!isAllowedHost(hostIds)) {
+    console.log(`[roam-webhook] call_ended SKIPPED — host not in allowlist. hosts=${JSON.stringify(hostIds)}`);
+    return;
+  }
+
+  const existing = await query(
+    `SELECT id, is_workshop_buyer FROM contacts WHERE LOWER(email) = $1`,
+    [email],
+  );
+  if (existing.rowCount === 0) {
+    console.log(`[roam-webhook] call_ended SKIPPED — no matching contact: ${email}`);
+    return;
+  }
+  if (!existing.rows[0].is_workshop_buyer) {
+    console.log(`[roam-webhook] call_ended SKIPPED — not a workshop buyer: ${email}`);
+    return;
+  }
+
+  // Use duration as a proxy for "actually showed up". Under 5 minutes = likely a
+  // no-show (joined briefly or call never really happened). Over 5 min = real call.
+  const noShowThreshold = Number(process.env.ROAM_NOSHOW_THRESHOLD_MINUTES || 5);
+  const showed = durationMinutes === null || durationMinutes >= noShowThreshold;
+
+  if (!showed) {
+    // Mark completed=true but disposition=no_show to feed the funnel correctly
+    await query(
+      `UPDATE contacts SET
+         call_completed = true,
+         call_completed_at = COALESCE(call_completed_at, NOW()),
+         call_disposition = COALESCE(call_disposition, 'no_show')
+       WHERE LOWER(email) = $1`,
+      [email],
+    );
+    console.log(`[roam-webhook] marked call_completed=true, disposition=no_show for ${email} (${durationMinutes} min < ${noShowThreshold})`);
+    return;
+  }
+
+  await query(
+    `UPDATE contacts SET
+       call_completed = true,
+       call_completed_at = COALESCE(call_completed_at, NOW())
+     WHERE LOWER(email) = $1`,
+    [email],
+  );
+  console.log(`[roam-webhook] marked call_completed for ${email} (${durationMinutes ?? 'unknown'} min)`);
+}
+
+function extractDurationMinutes(body: any): number | null {
+  if (!body || typeof body !== 'object') return null;
+
+  // Try a duration-like field first
+  const directCandidates = [
+    body.duration_minutes,
+    body.durationMinutes,
+    body.duration,
+    body.booking?.duration_minutes,
+    body.booking?.duration,
+    body.call?.duration,
+    body.call?.duration_minutes,
+  ];
+  for (const c of directCandidates) {
+    const n = Number(c);
+    if (!Number.isNaN(n) && n > 0) return Math.round(n);
+  }
+
+  // Fall back to computing from start/end timestamps
+  const starts = [body.start, body.booking?.start, body.call?.start, body.startTime];
+  const ends = [body.end, body.booking?.end, body.call?.end, body.endTime, body.actualEnd];
+  for (let i = 0; i < starts.length; i++) {
+    const s = starts[i];
+    const e = ends[i];
+    if (typeof s === 'string' && typeof e === 'string') {
+      const ms = new Date(e).getTime() - new Date(s).getTime();
+      if (!Number.isNaN(ms) && ms > 0) return Math.round(ms / 60000);
+    }
+  }
+  return null;
 }
 
 export default router;
