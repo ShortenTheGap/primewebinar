@@ -287,7 +287,8 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
     (c) => c.call_disposition === 'follow_up' && !c.converted_to_pe && !c.is_guest,
   );
   const followUpCount = openFollowUps.length;
-  const openPipelineValue = followUpCount * 2500;
+  // $500 deposit already collected at call booking, so first payment on close is $2,000.
+  const openPipelineValue = followUpCount * 2000;
 
   // Avg days from WORKSHOP DATE to close. We don't have a separate
   // purchased_at column, and using contacts.created_at (DB insertion time)
@@ -356,7 +357,7 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
     {
       label: 'Open Pipeline Value',
       value: fmtCurrencyExact(openPipelineValue),
-      sub: `${followUpCount} follow-ups × $2,500/mo`,
+      sub: `${followUpCount} follow-ups × $2,000 first payment`,
     },
     { label: 'Workshop→Close Days', value: (Math.round(avgDaysWorkshopToClose * 10) / 10).toString() },
   ];
