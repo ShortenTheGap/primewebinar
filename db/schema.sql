@@ -90,6 +90,12 @@ ALTER TABLE contacts ADD COLUMN IF NOT EXISTS attended_minutes INTEGER;
 ALTER TABLE cohorts ADD COLUMN IF NOT EXISTS zoom_webinar_id TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_cohorts_zoom_webinar_id ON cohorts(zoom_webinar_id) WHERE zoom_webinar_id IS NOT NULL;
 
+-- Prime Elite payment plan tracking. Monthly subscribers pay $2000 first
+-- month (deposit $500 already collected → $2500 total first month) then 11
+-- payments of $2500. Paid-in-full pays $30000 upfront. Both have $2500 MRR.
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS pe_payment_plan TEXT;
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS pe_initial_payment NUMERIC(10,2);
+
 -- One person can buy multiple workshops. Drop the unique-ghl_contact_id
 -- constraint in favor of a composite unique on (email, workshop_cohort) so
 -- a contact gets one row per cohort they're in.

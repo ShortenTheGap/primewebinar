@@ -27,6 +27,8 @@ export interface ContactRow {
   converted_at: string | null;
   assigned_rep: string | null;
   mrr_value: number;
+  pe_payment_plan?: string | null;
+  pe_initial_payment?: number | string | null;
 }
 
 export interface AdSpendRow {
@@ -181,7 +183,16 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
   // ── Cost & Revenue ─────────────────────────────────────────────────
   const totalAdSpend = adSpend.reduce((s, row) => s + Number(row.spend), 0);
   const mrrAdded = converted.reduce((s, c) => s + (c.mrr_value || 0), 0);
-  const revenueCollected = purchaseCount * 97 + depositedCount * 500;
+  // PE initial payments: $30k for paid-in-full, $2k for monthly (deposit $500
+  // already counted below). If pe_initial_payment is explicitly stored, use it.
+  const peInitialPayments = converted.reduce((s, c) => {
+    const n = Number(c.pe_initial_payment);
+    if (!Number.isNaN(n) && n > 0) return s + n;
+    if (c.pe_payment_plan === 'paid_in_full') return s + 30000;
+    if (c.pe_payment_plan === 'monthly') return s + 2000;
+    return s; // no plan info — don't double-count
+  }, 0);
+  const revenueCollected = purchaseCount * 97 + depositedCount * 500 + peInitialPayments;
   const projected12moLTV = mrrAdded * 12;
   const costPerBuy = safeDivide(totalAdSpend, purchaseCount);
   const costPerClose = safeDivide(totalAdSpend, convertedCount);
@@ -273,9 +284,18 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
   });
 
   // ── Revenue Waterfall ──────────────────────────────────────────────
+  const paidInFullCount = converted.filter((c) => c.pe_payment_plan === 'paid_in_full').length;
+  const monthlyCount = converted.filter((c) => c.pe_payment_plan === 'monthly').length;
+
   const revenueWaterfall = [
     { label: '$97 Workshop Sales', value: fmtCurrencyExact(purchaseCount * 97) },
     { label: `$500 Deposits (${depositedCount})`, value: fmtCurrencyExact(depositedCount * 500) },
+    ...(paidInFullCount > 0
+      ? [{ label: `PE Paid-in-Full (${paidInFullCount})`, value: fmtCurrencyExact(paidInFullCount * 30000) }]
+      : []),
+    ...(monthlyCount > 0
+      ? [{ label: `PE Monthly 1st Payments (${monthlyCount})`, value: fmtCurrencyExact(monthlyCount * 2000) }]
+      : []),
     { label: 'Total Collected', value: fmtCurrencyExact(revenueCollected) },
     { label: 'MRR Added', value: `${fmtCurrencyExact(mrrAdded)}/mo`, color: 'green' },
     { label: 'Projected 12-mo LTV', value: fmtCurrencyExact(projected12moLTV), color: 'green' },

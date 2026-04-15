@@ -153,8 +153,14 @@ export async function processGhlEvent(event: string, body: Record<string, any>):
     }
 
     case 'contact.converted': {
-      const { email, ghl_contact_id, workshop_cohort, mrr_value, assigned_rep } = body;
+      const { email, ghl_contact_id, workshop_cohort, mrr_value, assigned_rep, payment_plan, initial_payment } = body;
       const mrr = Number(mrr_value) > 0 ? Math.round(Number(mrr_value)) : 2500;
+      // Default initial_payment based on plan when not explicitly provided
+      const plan = payment_plan === 'paid_in_full' || payment_plan === 'monthly' ? payment_plan : null;
+      const initPay = Number(initial_payment) > 0
+        ? Number(initial_payment)
+        : (plan === 'paid_in_full' ? 30000 : plan === 'monthly' ? 2000 : null);
+
       const targetId = await resolveContactId(email, ghl_contact_id, workshop_cohort, 'converted');
       if (!targetId) break;
 
@@ -164,11 +170,13 @@ export async function processGhlEvent(event: string, body: Record<string, any>):
            converted_at = COALESCE(converted_at, NOW()),
            mrr_value = GREATEST(COALESCE(mrr_value, 0), $1::int),
            assigned_rep = COALESCE($2, assigned_rep),
-           call_disposition = COALESCE(call_disposition, 'sold')
+           call_disposition = COALESCE(call_disposition, 'sold'),
+           pe_payment_plan = COALESCE($4, pe_payment_plan),
+           pe_initial_payment = COALESCE($5::numeric, pe_initial_payment)
          WHERE id = $3`,
-        [mrr, assigned_rep || null, targetId],
+        [mrr, assigned_rep || null, targetId, plan, initPay],
       );
-      console.log(`[ghl] converted ${email || ghl_contact_id} → mrr=${mrr}`);
+      console.log(`[ghl] converted ${email || ghl_contact_id} → mrr=${mrr}, plan=${plan || 'unspecified'}, initial=${initPay || 'n/a'}`);
       break;
     }
 
