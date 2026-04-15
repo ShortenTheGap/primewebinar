@@ -259,8 +259,9 @@ router.post('/', async (req: Request, res: Response) => {
 
 /**
  * Router for different ro.am event types. Currently handles:
- *   lobby:booked / call:booked / booking:created  → mark call_booked
- *   lobby:ended  / call:ended  / meeting:ended    → mark call_completed
+ *   lobby:booked / call:booked / booking:created          → mark call_booked
+ *   recording.saved / transcript.saved / *ended / *completed / onair.event.updated
+ *                                                         → mark call_completed
  *   (anything else) → log + ignore
  */
 async function processRoamEvent(eventType: string, body: any): Promise<void> {
@@ -270,7 +271,17 @@ async function processRoamEvent(eventType: string, body: any): Promise<void> {
     await handleBooked(body);
     return;
   }
-  if (et.includes('ended') || et.includes('completed') || et.includes('finished')) {
+  // ro.am uses "recording.saved" and "transcript.saved" as signals that a call
+  // actually happened (either is a strong proxy for call completion).
+  // Also catch generic *:ended / *:completed / *:finished / onair:updated.
+  if (
+    et.includes('recording') ||
+    et.includes('transcript') ||
+    et.includes('ended') ||
+    et.includes('completed') ||
+    et.includes('finished') ||
+    et === 'onair.event.updated'
+  ) {
     await handleCallEnded(body);
     return;
   }
