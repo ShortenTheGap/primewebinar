@@ -54,6 +54,19 @@ export async function syncMetaAdsInsights(opts?: { since?: string; until?: strin
     url.searchParams.set('level', 'ad');
     url.searchParams.set('time_increment', '1'); // break multi-day ranges into daily rows
     url.searchParams.set('limit', '500');
+    // Include archived/deleted campaigns. By default Meta's insights API
+    // only returns ACTIVE/PAUSED, so historical spend from turned-off
+    // campaigns silently disappears from the totals.
+    url.searchParams.set(
+      'filtering',
+      JSON.stringify([
+        {
+          field: 'ad.effective_status',
+          operator: 'IN',
+          value: ['ACTIVE', 'PAUSED', 'DELETED', 'ARCHIVED', 'IN_PROCESS', 'WITH_ISSUES'],
+        },
+      ]),
+    );
     url.searchParams.set('access_token', accessToken);
 
     let upserted = 0;
