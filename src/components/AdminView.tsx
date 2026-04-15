@@ -75,6 +75,7 @@ export default function AdminView() {
   const [openAdsPanel, setOpenAdsPanel] = useState<string | null>(null);
   const [adEditCampaigns, setAdEditCampaigns] = useState<Set<string>>(new Set());
   const [adEditStart, setAdEditStart] = useState<string>('');
+  const [campaignFilter, setCampaignFilter] = useState<string>('');
 
   async function loadCohorts() {
     if (!token) return;
@@ -439,14 +440,33 @@ export default function AdminView() {
                               Attributed Campaigns ({adEditCampaigns.size} selected)
                             </label>
                             <span className="text-[11px] text-muted">
-                              {campaigns.length === 0
-                                ? 'No campaigns pulled yet — hit "Sync Meta Ads" up top'
-                                : `${campaigns.length} total in ad account`}
+                              {(() => {
+                                if (campaigns.length === 0) return 'No campaigns pulled yet — hit "Sync Meta Ads" up top';
+                                const q = campaignFilter.trim().toLowerCase();
+                                if (!q) return `${campaigns.length} total in ad account`;
+                                const n = campaigns.filter((c) => (c.campaign_name || '').toLowerCase().includes(q)).length;
+                                return `${n} of ${campaigns.length} match "${campaignFilter}"`;
+                              })()}
                             </span>
                           </div>
                           {campaigns.length > 0 && (
+                            <input
+                              type="text"
+                              value={campaignFilter}
+                              onChange={(e) => setCampaignFilter(e.target.value)}
+                              placeholder='Filter by name (e.g. "workshop", "webinar")'
+                              className="w-full mb-2 bg-[#141414] border border-border rounded px-3 py-1.5 text-sm placeholder:text-muted"
+                            />
+                          )}
+                          {campaigns.length > 0 && (
                             <div className="max-h-[280px] overflow-y-auto border border-border rounded">
-                              {campaigns.map((camp) => {
+                              {campaigns
+                                .filter((camp) => {
+                                  const q = campaignFilter.trim().toLowerCase();
+                                  if (!q) return true;
+                                  return (camp.campaign_name || '').toLowerCase().includes(q);
+                                })
+                                .map((camp) => {
                                 const checked = adEditCampaigns.has(camp.campaign_id);
                                 return (
                                   <label
