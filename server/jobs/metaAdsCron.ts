@@ -51,19 +51,30 @@ export async function syncMetaAdsInsights(opts?: { since?: string; until?: strin
     const url = new URL(`https://graph.facebook.com/v19.0/act_${adAccountId}/insights`);
     url.searchParams.set('fields', fields);
     url.searchParams.set('time_range', JSON.stringify({ since, until }));
-    url.searchParams.set('level', 'ad');
+    url.searchParams.set('level', 'campaign');
     url.searchParams.set('time_increment', '1'); // break multi-day ranges into daily rows
     url.searchParams.set('limit', '500');
-    // Include archived/deleted campaigns. By default Meta's insights API
-    // only returns ACTIVE/PAUSED, so historical spend from turned-off
-    // campaigns silently disappears from the totals.
+    // Explicitly include paused/archived/deleted campaigns so historical
+    // spend from turned-off campaigns isn't silently dropped.
     url.searchParams.set(
       'filtering',
       JSON.stringify([
         {
-          field: 'ad.effective_status',
+          field: 'campaign.effective_status',
           operator: 'IN',
-          value: ['ACTIVE', 'PAUSED', 'DELETED', 'ARCHIVED', 'IN_PROCESS', 'WITH_ISSUES'],
+          value: [
+            'ACTIVE',
+            'PAUSED',
+            'DELETED',
+            'ARCHIVED',
+            'IN_PROCESS',
+            'WITH_ISSUES',
+            'CAMPAIGN_PAUSED',
+            'PENDING_REVIEW',
+            'DISAPPROVED',
+            'PREAPPROVED',
+            'PENDING_BILLING_INFO',
+          ],
         },
       ]),
     );
