@@ -100,6 +100,12 @@ ALTER TABLE contacts ADD COLUMN IF NOT EXISTS pe_initial_payment NUMERIC(10,2);
 -- Counted in attendance metrics but not revenue.
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS is_guest BOOLEAN NOT NULL DEFAULT false;
 
+-- Per-cohort Meta Ads attribution: which ad campaigns drove this workshop,
+-- and over what date window. Only ads matching a cohort's rules count
+-- toward its ROAS / Cost-per-Buy / etc.
+ALTER TABLE cohorts ADD COLUMN IF NOT EXISTS ad_campaign_ids TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE cohorts ADD COLUMN IF NOT EXISTS ad_attribution_start DATE;
+
 -- One person can buy multiple workshops. Drop the unique-ghl_contact_id
 -- constraint in favor of a composite unique on (email, workshop_cohort) so
 -- a contact gets one row per cohort they're in.

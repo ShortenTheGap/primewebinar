@@ -31,12 +31,40 @@ router.use(requireAdminToken);
 router.get('/cohorts', async (_req: Request, res: Response) => {
   try {
     const result = await query(
-      `SELECT id, workshop_date, label, is_active, zoom_webinar_id, created_at
+      `SELECT id, workshop_date, label, is_active, zoom_webinar_id,
+              ad_campaign_ids, ad_attribution_start, created_at
        FROM cohorts ORDER BY workshop_date DESC`,
     );
     res.json({ cohorts: result.rows });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || 'Failed to list cohorts' });
+  }
+});
+
+/**
+ * GET /api/admin/meta-campaigns
+ * Distinct Meta campaigns pulled from ad_spend, with spend totals and
+ * date ranges. Used by the /admin UI to let users assign campaigns to
+ * cohorts for attribution.
+ */
+router.get('/meta-campaigns', async (_req: Request, res: Response) => {
+  try {
+    const result = await query(
+      `SELECT
+         campaign_id,
+         MAX(campaign_name) AS campaign_name,
+         MIN(date) AS first_date,
+         MAX(date) AS last_date,
+         SUM(spend)::numeric(12,2) AS total_spend,
+         SUM(impressions)::int AS total_impressions,
+         SUM(clicks)::int AS total_clicks
+       FROM ad_spend
+       GROUP BY campaign_id
+       ORDER BY SUM(spend) DESC`,
+    );
+    res.json({ campaigns: result.rows });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to list campaigns' });
   }
 });
 
@@ -50,12 +78,17 @@ router.get('/cohorts', async (_req: Request, res: Response) => {
 router.post('/cohorts', async (req: Request, res: Response) => {
   try {
     const body = req.body;
-    const items: Array<{ workshop_date: string; label?: string; zoom_webinar_id?: string }> =
-      Array.isArray(body?.cohorts) ? body.cohorts : body?.workshop_date ? [body] : [];
+    const items: Array<{
+      workshop_date: string;
+      label?: string;
+      zoom_webinar_id?: string;
+      ad_campaign_ids?: string[];
+      ad_attribution_start?: string | null;
+    }> = Array.isArray(body?.cohorts) ? body.cohorts : body?.workshop_date ? [body] : [];
 
     if (items.length === 0) {
       res.status(400).json({
-        error: 'Provide { workshop_date, label?, zoom_webinar_id? } or a { cohorts: [...] } array',
+        error: 'Provide { workshop_date, label?, zoom_webinar_id?, ad_campaign_ids?, ad_attribution_start? } or a { cohorts: [...] } array',
       });
       return;
     }
@@ -70,14 +103,44 @@ router.post('/cohorts', async (req: Request, res: Response) => {
       const label = item.label || formatDefaultLabel(item.workshop_date);
       const zoomId = item.zoom_webinar_id ? String(item.zoom_webinar_id).replace(/\s+/g, '') : null;
 
+      // Ad attribution: presence of the key means "user explicitly set this".
+      // undefined = keep existing DB value. null/empty array = clear it.
+      const hasAdCampaigns = 'ad_campaign_ids' in item;
+      const hasAdStart = 'ad_attribution_start' in item;
+      const adCampaigns = hasAdCampaigns
+        ? (Array.isArray(item.ad_campaign_ids) ? item.ad_campaign_ids.map(String) : [])
+        : null;
+      let adStart: string | null = null;
+      if (hasAdStart) {
+        const v = item.ad_attribution_start;
+        if (v && typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) {
+          adStart = v;
+        } else if (v === null || v === '') {
+          adStart = null;
+        } else {
+          res.status(400).json({ error: `Invalid ad_attribution_start: ${v}` });
+          return;
+        }
+      }
+
       const result = await query(
-        `INSERT INTO cohorts (workshop_date, label, zoom_webinar_id)
-         VALUES ($1, $2, $3)
+        `INSERT INTO cohorts (workshop_date, label, zoom_webinar_id, ad_campaign_ids, ad_attribution_start)
+         VALUES ($1, $2, $3, COALESCE($4::text[], '{}'), $5::date)
          ON CONFLICT (workshop_date) DO UPDATE SET
            label = EXCLUDED.label,
-           zoom_webinar_id = COALESCE(EXCLUDED.zoom_webinar_id, cohorts.zoom_webinar_id)
+           zoom_webinar_id = COALESCE(EXCLUDED.zoom_webinar_id, cohorts.zoom_webinar_id),
+           ad_campaign_ids = COALESCE($6::text[], cohorts.ad_campaign_ids),
+           ad_attribution_start = CASE WHEN $7::boolean THEN $5::date ELSE cohorts.ad_attribution_start END
          RETURNING workshop_date, (xmax = 0) AS inserted`,
-        [item.workshop_date, label, zoomId],
+        [
+          item.workshop_date,
+          label,
+          zoomId,
+          adCampaigns,
+          adStart,
+          adCampaigns, // $6 — same value as $4 for the UPDATE case
+          hasAdStart,  // $7 — flag whether to override ad_attribution_start on update
+        ],
       );
       touched.push({
         workshop_date: item.workshop_date,

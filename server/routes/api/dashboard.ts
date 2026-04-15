@@ -31,6 +31,7 @@ router.get('/', async (req: Request, res: Response) => {
       adSpend: adSpendResult.rows,
       zoomAttendance: zoomResult.rows,
       cohorts: cohortsResult.rows,
+      selectedCohort: cohort,
     });
 
     res.json(payload);

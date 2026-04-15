@@ -63,6 +63,9 @@ export interface CohortRow {
   label: string;
   is_active: boolean;
   created_at: string;
+  zoom_webinar_id?: string | null;
+  ad_campaign_ids?: string[] | null;
+  ad_attribution_start?: string | null;
 }
 
 export interface RawData {
@@ -70,6 +73,7 @@ export interface RawData {
   adSpend: AdSpendRow[];
   zoomAttendance: ZoomAttendanceRow[];
   cohorts: CohortRow[];
+  selectedCohort?: string; // "all" or a YYYY-MM-DD workshop_date
 }
 
 // ─── Formatting helpers ────────────────────────────────────────────────
@@ -156,8 +160,46 @@ const FUNNEL_COLORS = ['#2dd4bf', '#3b82f6', '#4ade80', '#f59e0b', '#f97316', '#
 
 // ─── Main computation ──────────────────────────────────────────────────
 
+/**
+ * Filter ad_spend rows to only those attributed to a cohort — i.e. the
+ * campaign is in the cohort's ad_campaign_ids AND the ad date falls in
+ * [ad_attribution_start, workshop_date].
+ *
+ * When selectedCohort is a specific cohort date, only that cohort's rules
+ * apply. When "all" (or undefined), the union of all cohort rules applies
+ * (non-webinar ads — those not in any cohort's campaign list — are excluded).
+ */
+function filterAttributedAdSpend(
+  adSpend: AdSpendRow[],
+  cohorts: CohortRow[],
+  selectedCohort?: string,
+): AdSpendRow[] {
+  const applicable = selectedCohort && selectedCohort !== 'all'
+    ? cohorts.filter((c) => c.workshop_date === selectedCohort)
+    : cohorts;
+
+  if (applicable.length === 0) return [];
+
+  return adSpend.filter((row) => {
+    const rowDate = row.date as unknown as string; // DATE → "YYYY-MM-DD"
+    return applicable.some((c) => {
+      if (!c.ad_campaign_ids || c.ad_campaign_ids.length === 0) return false;
+      if (!c.ad_campaign_ids.includes(row.campaign_id)) return false;
+      const start = c.ad_attribution_start as unknown as string | null;
+      const end = c.workshop_date as unknown as string;
+      if (start && rowDate < start) return false;
+      if (end && rowDate > end) return false;
+      return true;
+    });
+  });
+}
+
 export function computeDashboardMetrics(data: RawData): DashboardPayload {
-  const { contacts, adSpend, zoomAttendance, cohorts } = data;
+  const { contacts, zoomAttendance, cohorts, selectedCohort } = data;
+  // Filter ad_spend by cohort attribution rules. ROAS / Cost-per-Buy / ad
+  // performance all work off this filtered set so non-webinar campaigns
+  // never pollute the numbers.
+  const adSpend = filterAttributedAdSpend(data.adSpend, cohorts, selectedCohort);
 
   // ── Funnel Volume raw counts ───────────────────────────────────────
   // The business funnel (Workshop Purchases → Converted) excludes guests,
