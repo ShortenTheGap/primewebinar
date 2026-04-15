@@ -26,7 +26,14 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({
+  limit: '10mb',
+  // Capture raw body bytes for HMAC signature verification (needed for Svix-style
+  // webhook signing, e.g. ro.am). Stored on req.rawBody.
+  verify: (req, _res, buf) => {
+    (req as any).rawBody = buf.toString('utf8');
+  },
+}));
 app.use(express.text({ type: ['text/csv', 'text/plain'], limit: '10mb' }));
 
 // Serve static files from the Vite build output

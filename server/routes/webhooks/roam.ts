@@ -20,6 +20,32 @@ function verifyToken(provided: string | undefined): boolean {
 function extractEmail(body: any): string | null {
   if (!body || typeof body !== 'object') return null;
 
+  // Check plural-invitee arrays first (ro.am uses these).
+  // Prefer the one marked isBooker=true; otherwise the first one with an email.
+  const inviteeArrays = [
+    body.invitees,
+    body.attendees,
+    body.participants,
+    body.bookers,
+    body.booking?.invitees,
+    body.booking?.attendees,
+    body.booking?.participants,
+    body.data?.invitees,
+    body.payload?.invitees,
+  ];
+  for (const arr of inviteeArrays) {
+    if (!Array.isArray(arr)) continue;
+    const booker = arr.find(
+      (i: any) => i?.isBooker === true && typeof i.email === 'string' && i.email.includes('@'),
+    );
+    if (booker) return booker.email.trim().toLowerCase();
+    const first = arr.find(
+      (i: any) => typeof i?.email === 'string' && i.email.includes('@'),
+    );
+    if (first) return first.email.trim().toLowerCase();
+  }
+
+  // Fall back to singular-email paths
   const candidates = [
     body.email,
     body.attendee?.email,
@@ -36,7 +62,6 @@ function extractEmail(body: any): string | null {
     body.payload?.email,
     body.payload?.attendee?.email,
   ];
-
   for (const c of candidates) {
     if (typeof c === 'string' && c.includes('@')) {
       return c.trim().toLowerCase();
@@ -130,8 +155,64 @@ router.get('/', (_req: Request, res: Response) => {
   res.json({ ok: true, endpoint: 'roam-webhook' });
 });
 
+// Svix-style signature verification — ro.am uses Svix for webhook delivery.
+// Headers: webhook-id, webhook-timestamp, webhook-signature (format "v1,<base64> v1,<base64>").
+// Signed payload: `${webhookId}.${timestamp}.${rawBody}`
+// Key: base64-decoded secret (after stripping "whsec_" prefix if present).
+// Digest: HMAC-SHA256, base64-encoded.
+function verifySvixSignature(req: Request): boolean {
+  const secret = process.env.ROAM_WEBHOOK_SECRET || '';
+  if (!secret) return false;
+
+  const webhookId = req.headers['webhook-id'] as string | undefined;
+  const webhookTimestamp = req.headers['webhook-timestamp'] as string | undefined;
+  const webhookSignature = req.headers['webhook-signature'] as string | undefined;
+  if (!webhookId || !webhookTimestamp || !webhookSignature) return false;
+
+  const rawBody: string = (req as any).rawBody ?? JSON.stringify(req.body || {});
+  const signedContent = `${webhookId}.${webhookTimestamp}.${rawBody}`;
+
+  // Secret may or may not have the "whsec_" prefix. Try both.
+  const secretVariants = [
+    secret.replace(/^whsec_/, ''),
+    secret,
+  ];
+
+  // Signature header can contain multiple space-separated signatures: "v1,<b64> v1,<b64alt>"
+  const providedSigs = webhookSignature
+    .split(' ')
+    .map((s) => s.split(',').pop() || '')
+    .filter(Boolean);
+
+  for (const s of secretVariants) {
+    // Try secret as raw bytes (Svix uses base64-decoded secret)
+    const keyVariants: Buffer[] = [];
+    try { keyVariants.push(Buffer.from(s, 'base64')); } catch {}
+    keyVariants.push(Buffer.from(s, 'utf8'));
+
+    for (const key of keyVariants) {
+      const computed = crypto.createHmac('sha256', key).update(signedContent).digest('base64');
+      for (const provided of providedSigs) {
+        if (providedMatch(computed, provided)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function providedMatch(a: string, b: string): boolean {
+  try {
+    const bufA = Buffer.from(a);
+    const bufB = Buffer.from(b);
+    if (bufA.length !== bufB.length) return false;
+    return crypto.timingSafeEqual(bufA, bufB);
+  } catch {
+    return false;
+  }
+}
+
 router.post('/', async (req: Request, res: Response) => {
-  // Single-line JSON log so Railway captures it as one entry (easier to grep)
+  // Single-line JSON log so Railway captures it as one entry
   console.log(JSON.stringify({
     marker: 'roam-webhook-received',
     allHeaders: req.headers,
@@ -139,53 +220,26 @@ router.post('/', async (req: Request, res: Response) => {
     bodyPreview: JSON.stringify(req.body || {}).slice(0, 1500),
   }));
 
-  // Try several common token header conventions
+  // 1) Try Svix-style signature (what ro.am uses)
+  const svixValid = verifySvixSignature(req);
+  // 2) Fall back to raw-token header schemes (in case ro.am ever offers a simpler auth)
   const tokenCandidates = [
     req.headers['x-roam-token'],
-    req.headers['x-roam-signature'],
     req.headers['x-webhook-secret'],
     req.headers['x-webhook-token'],
     req.headers['x-api-key'],
     (req.headers['authorization'] as string | undefined)?.replace(/^Bearer\s+/i, ''),
-    (req.headers['authorization'] as string | undefined)?.replace(/^Basic\s+/i, ''),
-    req.headers['authorization'],
   ];
   const token = tokenCandidates.find((v) => typeof v === 'string' && v.length > 0) as string | undefined;
-
-  // Accept HMAC-signed requests too: if there's a signature header, verify
-  // the body signature against ROAM_WEBHOOK_SECRET
-  const rawBody = JSON.stringify(req.body || {});
-  const signatureCandidates = [
-    req.headers['x-roam-signature'],
-    req.headers['x-webhook-signature'],
-    req.headers['x-signature'],
-    req.headers['x-hub-signature-256'],
-  ].filter((v) => typeof v === 'string') as string[];
-
-  const isHmacValid = signatureCandidates.some((sig) => {
-    const secret = process.env.ROAM_WEBHOOK_SECRET || '';
-    if (!secret) return false;
-    const computed = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
-    // Accept formats: "<hex>", "sha256=<hex>", "v0=<hex>"
-    const normalized = sig.replace(/^(sha256=|v0=)/i, '');
-    try {
-      return crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(normalized));
-    } catch {
-      return false;
-    }
-  });
-
   const tokenValid = verifyToken(token);
 
-  if (!tokenValid && !isHmacValid) {
-    console.warn('[roam-webhook] rejected — no matching token or HMAC signature found');
-    console.warn('[roam-webhook] tokenCandidates checked:', tokenCandidates.map((v) => (v ? String(v).slice(0, 8) + '...' : 'none')));
-    console.warn('[roam-webhook] signatureCandidates checked:', signatureCandidates.length);
+  if (!svixValid && !tokenValid) {
+    console.warn('[roam-webhook] rejected — signature/token did not validate');
     res.status(401).json({ error: 'Invalid or missing auth' });
     return;
   }
 
-  console.log(`[roam-webhook] auth passed via ${tokenValid ? 'token' : 'HMAC signature'}`);
+  console.log(`[roam-webhook] auth passed via ${svixValid ? 'Svix signature' : 'token'}`);
 
   // Respond 200 fast so ro.am doesn't retry
   res.status(200).json({ received: true });
