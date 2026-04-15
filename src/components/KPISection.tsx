@@ -32,13 +32,13 @@ function Card({ card, variant }: { card: KPICard; variant?: 'cro' | 'default' })
       </span>
       <div className="flex flex-col">
         {card.breakdown && card.breakdown.length > 0 ? (
-          <div className="flex items-baseline gap-4">
+          <div className="flex items-baseline gap-3 flex-wrap leading-none">
             {card.breakdown.map((item, i) => (
-              <div key={i} className="flex flex-col leading-none">
+              <div key={i} className="flex items-baseline gap-1.5">
                 <span className={`text-2xl font-bold ${resolveColor(item.color)}`}>
                   {item.value}
                 </span>
-                <span className="text-[10px] uppercase tracking-wider text-muted mt-1">
+                <span className="text-[10px] uppercase tracking-wider text-muted font-medium">
                   {item.label}
                 </span>
               </div>
