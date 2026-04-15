@@ -118,6 +118,38 @@ export async function processGhlEvent(event: string, body: Record<string, any>):
       break;
     }
 
+    case 'contact.converted': {
+      // Fires when someone actually purchases Prime Elite.
+      // Same identity-fields pattern as deposit_paid / call_booked.
+      // Optionally accepts an explicit mrr_value (defaults to 2500).
+      // Idempotent — converted_at only sets on first fire.
+      const { email, ghl_contact_id, workshop_cohort, mrr_value, assigned_rep } = body;
+      if (!email && !ghl_contact_id) {
+        console.warn('[ghl] converted: no email or ghl_contact_id, skipping');
+        break;
+      }
+      const mrr = Number(mrr_value) > 0 ? Math.round(Number(mrr_value)) : 2500;
+
+      const result = await query(
+        `UPDATE contacts SET
+           converted_to_pe = true,
+           converted_at = COALESCE(converted_at, NOW()),
+           mrr_value = GREATEST(COALESCE(mrr_value, 0), $4::int),
+           assigned_rep = COALESCE($5, assigned_rep),
+           workshop_cohort = COALESCE($3::date, workshop_cohort),
+           call_disposition = COALESCE(call_disposition, 'sold')
+         WHERE ghl_contact_id = $1 OR LOWER(email) = LOWER($2)
+         RETURNING id`,
+        [ghl_contact_id || null, email || null, workshop_cohort || null, mrr, assigned_rep || null],
+      );
+      if (result.rowCount === 0) {
+        console.warn(`[ghl] converted: no contact matched (ghl_id=${ghl_contact_id}, email=${email})`);
+      } else {
+        console.log(`[ghl] converted ${email || ghl_contact_id} → mrr=${mrr}`);
+      }
+      break;
+    }
+
     case 'contact.call_completed': {
       // Manual / GHL-driven mark that a call happened. Optionally accepts a
       // disposition (sold | follow_up | not_a_fit | no_show) and assigned_rep.
