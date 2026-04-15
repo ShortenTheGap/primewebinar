@@ -81,9 +81,9 @@ export async function processGhlEvent(event: string, body: Record<string, any>):
         `UPDATE contacts SET
            deposit_paid = true,
            deposit_paid_at = COALESCE(deposit_paid_at, NOW()),
-           workshop_cohort = COALESCE(workshop_cohort, $3::date)
+           workshop_cohort = COALESCE($3::date, workshop_cohort)
          WHERE ghl_contact_id = $1 OR LOWER(email) = LOWER($2)
-         RETURNING id`,
+         RETURNING id, workshop_cohort`,
         [ghl_contact_id || null, email || null, workshop_cohort || null],
       );
 
