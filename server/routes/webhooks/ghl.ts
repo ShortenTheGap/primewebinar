@@ -181,7 +181,10 @@ export async function processGhlEvent(event: string, body: Record<string, any>):
            converted_at = COALESCE(converted_at, NOW()),
            mrr_value = GREATEST(COALESCE(mrr_value, 0), $1::int),
            assigned_rep = COALESCE($2, assigned_rep),
-           call_disposition = COALESCE(call_disposition, 'sold'),
+           -- Conversion is the definitive outcome — always mark as 'sold',
+           -- overriding any prior disposition (e.g. 'follow_up' from a
+           -- previous call that later closed).
+           call_disposition = 'sold'::call_disposition_type,
            pe_payment_plan = COALESCE($4, pe_payment_plan),
            pe_initial_payment = COALESCE($5::numeric, pe_initial_payment)
          WHERE id = $3`,

@@ -435,6 +435,7 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
     dispositionCounts.set(key, 0);
   }
   for (const c of contacts) {
+    if (c.is_guest) continue; // guests aren't in the sales funnel
     if (c.call_disposition && dispositionCounts.has(c.call_disposition)) {
       dispositionCounts.set(c.call_disposition, dispositionCounts.get(c.call_disposition)! + 1);
     }
@@ -451,12 +452,19 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
   // Disposition stats
   const depositRefundedCount = contacts.filter((c) => c.deposit_refunded).length;
 
-  const contactsWithCallDate = contacts.filter((c) => c.call_booked_at && c.created_at && c.is_workshop_buyer);
+  // Avg days from WORKSHOP date to call booked. Anchored to workshop_cohort
+  // so backfilled contacts give meaningful numbers (using contacts.created_at
+  // would just be the DB insertion time for manually-added rows).
+  const contactsWithCallDate = contacts.filter(
+    (c) => c.call_booked_at && c.workshop_cohort && c.is_workshop_buyer && !c.is_guest,
+  );
   const avgDaysPurchaseToCall =
     contactsWithCallDate.length > 0
       ? Math.round(
-          (contactsWithCallDate.reduce((sum, c) => sum + daysBetween(c.created_at, c.call_booked_at!), 0) /
-            contactsWithCallDate.length) *
+          (contactsWithCallDate.reduce((sum, c) => {
+            const workshopDate = c.workshop_cohort as unknown as string;
+            return sum + daysBetween(workshopDate, c.call_booked_at!);
+          }, 0) / contactsWithCallDate.length) *
             10,
         ) / 10
       : 0;

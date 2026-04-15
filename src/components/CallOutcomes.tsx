@@ -76,7 +76,7 @@ export default function CallOutcomes({ dispositions, stats, leaderboard, closerS
               <span className="font-medium">{stats.depositRefunded}</span>
             </div>
             <div className="flex justify-between text-sm">
-              <span className="text-muted">Avg days purchase→call</span>
+              <span className="text-muted">Avg days workshop→call</span>
               <span className="font-medium">{stats.avgDaysPurchaseToCall}</span>
             </div>
             <div className="flex justify-between text-sm">
