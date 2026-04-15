@@ -95,6 +95,29 @@ export async function processGhlEvent(event: string, body: Record<string, any>):
       break;
     }
 
+    case 'contact.call_booked': {
+      // Same pattern as contact.deposit_paid — matches by ghl_contact_id or
+      // email, lets the webhook's date overwrite workshop_cohort when given.
+      const { email, ghl_contact_id, workshop_cohort } = body;
+      if (!email && !ghl_contact_id) {
+        console.warn('[ghl] call_booked: no email or ghl_contact_id, skipping');
+        break;
+      }
+      const result = await query(
+        `UPDATE contacts SET
+           call_booked = true,
+           call_booked_at = COALESCE(call_booked_at, NOW()),
+           workshop_cohort = COALESCE($3::date, workshop_cohort)
+         WHERE ghl_contact_id = $1 OR LOWER(email) = LOWER($2)
+         RETURNING id`,
+        [ghl_contact_id || null, email || null, workshop_cohort || null],
+      );
+      if (result.rowCount === 0) {
+        console.warn(`[ghl] call_booked: no contact matched (ghl_id=${ghl_contact_id}, email=${email})`);
+      }
+      break;
+    }
+
     case 'contact.tag_added': {
       const { email, tag } = body;
 

@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import ghlRouter from './routes/webhooks/ghl.js';
 import zoomRouter from './routes/webhooks/zoom.js';
+import roamRouter from './routes/webhooks/roam.js';
 import dashboardRouter from './routes/api/dashboard.js';
 import healthRouter from './routes/api/health.js';
 import adminRouter from './routes/api/admin.js';
@@ -37,6 +38,7 @@ app.use(express.static(clientDir));
 // Mount route handlers
 app.use('/webhooks/ghl', ghlRouter);
 app.use('/webhooks/zoom', zoomRouter);
+app.use('/webhooks/roam', roamRouter);
 app.use('/api/dashboard', dashboardRouter);
 app.use('/api/health', healthRouter);
 app.use('/api/admin', adminRouter);
