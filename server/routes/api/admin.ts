@@ -3,6 +3,7 @@ import { parse as parseCsv } from 'csv-parse/sync';
 import { query } from '../../lib/db.js';
 import { processGhlEvent } from '../webhooks/ghl.js';
 import { processParticipantLeft } from '../webhooks/zoom.js';
+import { syncMetaAdsInsights } from '../../jobs/metaAdsCron.js';
 
 const router = Router();
 
@@ -652,6 +653,37 @@ router.post('/import-zoom-csv', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('Zoom CSV import failed:', err);
     res.status(500).json({ error: err?.message || 'Zoom CSV import failed' });
+  }
+});
+
+/**
+ * POST /api/admin/meta-sync
+ * Manually trigger a Meta Ads insights sync. Useful for backfilling
+ * historical ad spend and for testing the connection without waiting
+ * for the 6am UTC cron.
+ *
+ * Body (all optional):
+ *   { since: "YYYY-MM-DD", until: "YYYY-MM-DD" }
+ * Defaults to yesterday only (same as the cron).
+ * Max range: ~90 days (Meta's API limits).
+ */
+router.post('/meta-sync', async (req: Request, res: Response) => {
+  try {
+    const { since, until } = req.body || {};
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (since && !dateRegex.test(since)) {
+      res.status(400).json({ error: 'since must be YYYY-MM-DD' });
+      return;
+    }
+    if (until && !dateRegex.test(until)) {
+      res.status(400).json({ error: 'until must be YYYY-MM-DD' });
+      return;
+    }
+    const result = await syncMetaAdsInsights({ since, until });
+    const status = result.ok ? 200 : 500;
+    res.status(status).json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Meta sync failed' });
   }
 });
 
