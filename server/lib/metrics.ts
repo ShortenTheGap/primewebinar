@@ -388,6 +388,13 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
   const paidInFullCount = converted.filter((c) => c.pe_payment_plan === 'paid_in_full').length;
   const monthlyCount = converted.filter((c) => c.pe_payment_plan === 'monthly').length;
 
+  // At-risk deposits: deposit paid, not yet refunded, not yet closed. Once a
+  // lead converts to PE the $500 is secure; until then it could be refunded.
+  const atRiskDeposits = contacts.filter(
+    (c) => c.deposit_paid && !c.deposit_refunded && !c.converted_to_pe && !c.is_guest,
+  ).length;
+  const potentialRefundAmount = atRiskDeposits * 500;
+
   const revenueWaterfall = [
     { label: `$97 Workshop Sales (${purchaseCount})`, value: fmtCurrencyExact(workshopTicketRevenue) },
     { label: `$500 Deposits (${depositedCount})`, value: fmtCurrencyExact(depositedCount * 500) },
@@ -401,6 +408,11 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
     { label: 'MRR Added', value: `${fmtCurrencyExact(mrrAdded)}/mo`, color: 'green' },
     { label: 'Projected 12-mo LTV', value: fmtCurrencyExact(projected12moLTV), color: 'green' },
     { label: 'Ad Spend', value: fmtCurrencyExact(totalAdSpend), color: 'amber' },
+    {
+      label: `Potential Deposit Refunds (${atRiskDeposits})`,
+      value: fmtCurrencyExact(potentialRefundAmount),
+      color: 'amber',
+    },
     { label: 'ROAS', value: fmtMultiplier(roas) },
   ];
 
