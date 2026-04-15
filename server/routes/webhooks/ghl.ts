@@ -33,6 +33,19 @@ router.post('/', (req: Request, res: Response) => {
 });
 
 /**
+ * Parse an optional `occurred_at` field from an event body. Accepts an ISO
+ * date/timestamp string (e.g. "2026-04-05" or "2026-04-05T14:30:00Z").
+ * Returns null if absent or malformed — which means the SQL COALESCE will
+ * fall back to any existing value, then NOW().
+ */
+function parseOccurredAt(val: unknown): string | null {
+  if (!val || typeof val !== 'string') return null;
+  const d = new Date(val);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
+/**
  * Find the right contact row to update for a per-cohort event.
  *
  * Resolution order:
@@ -124,39 +137,42 @@ export async function processGhlEvent(event: string, body: Record<string, any>):
     }
 
     case 'contact.deposit_paid': {
-      const { email, ghl_contact_id, workshop_cohort, amount } = body;
+      const { email, ghl_contact_id, workshop_cohort, amount, occurred_at } = body;
       const targetId = await resolveContactId(email, ghl_contact_id, workshop_cohort, 'deposit_paid');
       if (!targetId) break;
+      const occurredAt = parseOccurredAt(occurred_at);
 
       await query(
         `UPDATE contacts SET
            deposit_paid = true,
-           deposit_paid_at = COALESCE(deposit_paid_at, NOW())
+           deposit_paid_at = COALESCE($2::timestamptz, deposit_paid_at, NOW())
          WHERE id = $1`,
-        [targetId],
+        [targetId, occurredAt],
       );
       if (amount) console.log(`[ghl] deposit_paid for ${email || ghl_contact_id} — amount ${amount}`);
       break;
     }
 
     case 'contact.call_booked': {
-      const { email, ghl_contact_id, workshop_cohort } = body;
+      const { email, ghl_contact_id, workshop_cohort, occurred_at } = body;
       const targetId = await resolveContactId(email, ghl_contact_id, workshop_cohort, 'call_booked');
       if (!targetId) break;
+      const occurredAt = parseOccurredAt(occurred_at);
 
       await query(
         `UPDATE contacts SET
            call_booked = true,
-           call_booked_at = COALESCE(call_booked_at, NOW())
+           call_booked_at = COALESCE($2::timestamptz, call_booked_at, NOW())
          WHERE id = $1`,
-        [targetId],
+        [targetId, occurredAt],
       );
       break;
     }
 
     case 'contact.converted': {
-      const { email, ghl_contact_id, workshop_cohort, mrr_value, assigned_rep, payment_plan, initial_payment } = body;
+      const { email, ghl_contact_id, workshop_cohort, mrr_value, assigned_rep, payment_plan, initial_payment, occurred_at } = body;
       const plan = payment_plan === 'paid_in_full' || payment_plan === 'monthly' ? payment_plan : null;
+      const occurredAt = parseOccurredAt(occurred_at);
 
       // MRR is 2500 for monthly subscribers (recurring). Paid-in-full has NO
       // monthly recurring revenue — they paid the full annual value upfront.
@@ -178,7 +194,9 @@ export async function processGhlEvent(event: string, body: Record<string, any>):
       await query(
         `UPDATE contacts SET
            converted_to_pe = true,
-           converted_at = COALESCE(converted_at, NOW()),
+           -- If occurred_at is supplied (backfill), it wins. Otherwise keep
+           -- the existing converted_at if any, else NOW() for live events.
+           converted_at = COALESCE($6::timestamptz, converted_at, NOW()),
            mrr_value = GREATEST(COALESCE(mrr_value, 0), $1::int),
            assigned_rep = COALESCE($2, assigned_rep),
            -- Conversion is the definitive outcome — always mark as 'sold',
@@ -188,27 +206,28 @@ export async function processGhlEvent(event: string, body: Record<string, any>):
            pe_payment_plan = COALESCE($4, pe_payment_plan),
            pe_initial_payment = COALESCE($5::numeric, pe_initial_payment)
          WHERE id = $3`,
-        [mrr, assigned_rep || null, targetId, plan, initPay],
+        [mrr, assigned_rep || null, targetId, plan, initPay, occurredAt],
       );
       console.log(`[ghl] converted ${email || ghl_contact_id} → mrr=${mrr}, plan=${plan || 'unspecified'}, initial=${initPay || 'n/a'}`);
       break;
     }
 
     case 'contact.call_completed': {
-      const { email, ghl_contact_id, workshop_cohort, disposition, assigned_rep } = body;
+      const { email, ghl_contact_id, workshop_cohort, disposition, assigned_rep, occurred_at } = body;
       const validDispositions = new Set(['sold', 'follow_up', 'not_a_fit', 'no_show']);
       const dispo = disposition && validDispositions.has(disposition) ? disposition : null;
       const targetId = await resolveContactId(email, ghl_contact_id, workshop_cohort, 'call_completed');
       if (!targetId) break;
+      const occurredAt = parseOccurredAt(occurred_at);
 
       await query(
         `UPDATE contacts SET
            call_completed = true,
-           call_completed_at = COALESCE(call_completed_at, NOW()),
+           call_completed_at = COALESCE($4::timestamptz, call_completed_at, NOW()),
            call_disposition = COALESCE($1::call_disposition_type, call_disposition),
            assigned_rep = COALESCE($2, assigned_rep)
          WHERE id = $3`,
-        [dispo, assigned_rep || null, targetId],
+        [dispo, assigned_rep || null, targetId, occurredAt],
       );
       break;
     }
