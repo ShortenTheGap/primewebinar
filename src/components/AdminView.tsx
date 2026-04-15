@@ -172,6 +172,28 @@ export default function AdminView() {
     setAdEditCampaigns(next);
   }
 
+  function filteredCampaignIds(): string[] {
+    const q = campaignFilter.trim().toLowerCase();
+    const src = q
+      ? campaigns.filter((c) => (c.campaign_name || '').toLowerCase().includes(q))
+      : campaigns;
+    return src.map((c) => c.campaign_id);
+  }
+
+  function selectAllFiltered() {
+    const ids = filteredCampaignIds();
+    const next = new Set(adEditCampaigns);
+    for (const id of ids) next.add(id);
+    setAdEditCampaigns(next);
+  }
+
+  function clearFiltered() {
+    const ids = new Set(filteredCampaignIds());
+    const next = new Set(adEditCampaigns);
+    for (const id of ids) next.delete(id);
+    setAdEditCampaigns(next);
+  }
+
   async function saveAdAttribution(cohort: Cohort) {
     try {
       await api(token, '/cohorts', 'POST', {
@@ -450,13 +472,29 @@ export default function AdminView() {
                             </span>
                           </div>
                           {campaigns.length > 0 && (
-                            <input
-                              type="text"
-                              value={campaignFilter}
-                              onChange={(e) => setCampaignFilter(e.target.value)}
-                              placeholder='Filter by name (e.g. "workshop", "webinar")'
-                              className="w-full mb-2 bg-[#141414] border border-border rounded px-3 py-1.5 text-sm placeholder:text-muted"
-                            />
+                            <div className="flex items-center gap-2 mb-2">
+                              <input
+                                type="text"
+                                value={campaignFilter}
+                                onChange={(e) => setCampaignFilter(e.target.value)}
+                                placeholder='Filter by name (e.g. "workshop", "webinar")'
+                                className="flex-1 bg-[#141414] border border-border rounded px-3 py-1.5 text-sm placeholder:text-muted"
+                              />
+                              <button
+                                type="button"
+                                onClick={selectAllFiltered}
+                                className="text-xs px-3 py-1.5 bg-teal/20 hover:bg-teal/30 text-teal border border-teal/40 rounded whitespace-nowrap"
+                              >
+                                Select All{campaignFilter.trim() ? ' Filtered' : ''}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={clearFiltered}
+                                className="text-xs px-3 py-1.5 text-muted hover:text-white border border-border rounded whitespace-nowrap"
+                              >
+                                Clear{campaignFilter.trim() ? ' Filtered' : ''}
+                              </button>
+                            </div>
                           )}
                           {campaigns.length > 0 && (
                             <div className="max-h-[280px] overflow-y-auto border border-border rounded">
