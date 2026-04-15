@@ -67,18 +67,30 @@ export async function processGhlEvent(event: string, body: Record<string, any>):
 
     case 'contact.deposit_paid': {
       // Fires when a deposit is actually purchased (GHL Order Submitted / Product Purchased trigger).
-      // Ties the email to an existing contact and flips the deposit flag + timestamp.
-      // Safe to fire multiple times — timestamp only sets on first fire.
-      const { email, amount } = body;
-      await query(
+      // Matches existing contact by ghl_contact_id (preferred) or email (fallback).
+      // Sets workshop_cohort if currently null (safety net; won't overwrite an existing value).
+      // Safe to fire multiple times — deposit_paid_at only sets on first fire.
+      const { email, ghl_contact_id, workshop_cohort, amount } = body;
+
+      if (!email && !ghl_contact_id) {
+        console.warn('[ghl] deposit_paid: no email or ghl_contact_id in body, skipping');
+        break;
+      }
+
+      const result = await query(
         `UPDATE contacts SET
            deposit_paid = true,
-           deposit_paid_at = COALESCE(deposit_paid_at, NOW())
-         WHERE LOWER(email) = LOWER($1)`,
-        [email],
+           deposit_paid_at = COALESCE(deposit_paid_at, NOW()),
+           workshop_cohort = COALESCE(workshop_cohort, $3::date)
+         WHERE ghl_contact_id = $1 OR LOWER(email) = LOWER($2)
+         RETURNING id`,
+        [ghl_contact_id || null, email || null, workshop_cohort || null],
       );
-      if (amount) {
-        console.log(`[ghl] deposit_paid for ${email} — amount ${amount}`);
+
+      if (result.rowCount === 0) {
+        console.warn(`[ghl] deposit_paid: no contact matched (ghl_id=${ghl_contact_id}, email=${email})`);
+      } else if (amount) {
+        console.log(`[ghl] deposit_paid for ${email || ghl_contact_id} — amount ${amount}`);
       }
       break;
     }
