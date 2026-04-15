@@ -233,18 +233,31 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
   // ── CRO Signals ───────────────────────────────────────────────────
   const totalRevenue = revenueCollected;
   const roas = safeDivide(totalRevenue, totalAdSpend);
-  const revPerAttendee = safeDivide(totalRevenue, attendeeCount);
+  // Revenue / attendee only makes sense against paid attendees (guests are
+  // free and don't contribute revenue).
+  const revPerAttendee = safeDivide(totalRevenue, paidAttendees);
   const revPerCallCompleted = safeDivide(totalRevenue, completedCount);
   const ghostRate = safeDivide(depositedCount - bookedCount, depositedCount) * 100;
-  const followUpCount = contacts.filter((c) => c.call_disposition === 'follow_up').length;
+
+  // Open pipeline: contacts currently in follow-up state AND haven't already
+  // converted. Also exclude guests (they're not in the sales funnel).
+  const openFollowUps = contacts.filter(
+    (c) => c.call_disposition === 'follow_up' && !c.converted_to_pe && !c.is_guest,
+  );
+  const followUpCount = openFollowUps.length;
   const openPipelineValue = followUpCount * 2500;
 
-  // Avg days purchase -> close for converted contacts
-  const convertedWithDates = converted.filter((c) => c.converted_at && c.created_at);
-  const avgDaysPurchaseToClose =
+  // Avg days from WORKSHOP DATE to close. We don't have a separate
+  // purchased_at column, and using contacts.created_at (DB insertion time)
+  // gives misleading numbers for backfilled contacts. workshop_cohort is a
+  // universal anchor — every buyer is tied to one specific workshop date.
+  const convertedWithDates = converted.filter((c) => c.converted_at && c.workshop_cohort);
+  const avgDaysWorkshopToClose =
     convertedWithDates.length > 0
-      ? convertedWithDates.reduce((sum, c) => sum + daysBetween(c.created_at, c.converted_at!), 0) /
-        convertedWithDates.length
+      ? convertedWithDates.reduce((sum, c) => {
+          const workshopDate = c.workshop_cohort as unknown as string; // DATE parsed as "YYYY-MM-DD"
+          return sum + daysBetween(workshopDate, c.converted_at!);
+        }, 0) / convertedWithDates.length
       : 0;
 
   // ── Funnel Volume KPI cards ────────────────────────────────────────
@@ -303,7 +316,7 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
       value: fmtCurrencyExact(openPipelineValue),
       sub: `${followUpCount} follow-ups × $2,500/mo`,
     },
-    { label: 'Purchase→Close Days', value: (Math.round(avgDaysPurchaseToClose * 10) / 10).toString() },
+    { label: 'Workshop→Close Days', value: (Math.round(avgDaysWorkshopToClose * 10) / 10).toString() },
   ];
 
   // ── Cost & Revenue KPI cards ───────────────────────────────────────
@@ -349,27 +362,46 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
   ];
 
   // ── Lead Source Breakdown ──────────────────────────────────────────
+  // Business metrics only — guests aren't attributable to a lead source.
   const sourceGroups = new Map<
     string,
-    { purchases: number; deposited: number; callsBooked: number; closed: number }
+    { purchases: number; deposited: number; callsBooked: number; closed: number; revenue: number }
   >();
 
   for (const c of contacts) {
+    if (c.is_guest) continue;
     const src = c.lead_source || 'Unknown';
     if (!sourceGroups.has(src)) {
-      sourceGroups.set(src, { purchases: 0, deposited: 0, callsBooked: 0, closed: 0 });
+      sourceGroups.set(src, { purchases: 0, deposited: 0, callsBooked: 0, closed: 0, revenue: 0 });
     }
     const g = sourceGroups.get(src)!;
-    if (c.is_workshop_buyer) g.purchases++;
-    if (c.deposit_paid) g.deposited++;
+    if (c.is_workshop_buyer) {
+      g.purchases++;
+      g.revenue += 97; // workshop ticket
+    }
+    if (c.deposit_paid) {
+      g.deposited++;
+      g.revenue += 500;
+    }
     if (c.call_booked) g.callsBooked++;
-    if (c.converted_to_pe) g.closed++;
+    if (c.converted_to_pe) {
+      g.closed++;
+      // Add the real annual contract value: actual initial_payment (paid-in-full)
+      // or $30k annualized for monthly subscribers. Both plans = $30k LTV.
+      const n = Number(c.pe_initial_payment);
+      if (c.pe_payment_plan === 'paid_in_full') {
+        g.revenue += Number.isNaN(n) || n <= 0 ? 30000 : n;
+      } else {
+        // monthly or unspecified — $30k annual value
+        g.revenue += 30000;
+      }
+    }
   }
 
   const leadSourceTable = Array.from(sourceGroups.entries())
     .map(([source, g]) => {
       const cr = safeDivide(g.closed, g.callsBooked) * 100;
-      const revenue = g.closed * 2500 + g.deposited * 500;
+      const revenue = g.revenue;
       const quality: 'High' | 'Mid' | 'Low' = cr >= 40 ? 'High' : cr >= 20 ? 'Mid' : 'Low';
       return {
         source,

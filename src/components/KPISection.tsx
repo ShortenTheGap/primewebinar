@@ -25,12 +25,17 @@ function Card({ card, variant }: { card: KPICard; variant?: 'cro' | 'default' })
   const bg = variant === 'cro' ? 'bg-[#141414]' : 'bg-card';
   const valueColor = resolveColor(card.color);
 
+  // Card layout (absolute positioning for consistent baselines):
+  //   - Label pinned to top
+  //   - Value pinned to a fixed offset from the bottom (so its baseline
+  //     is identical across ALL cards, whether or not they have a sub)
+  //   - Sub pinned to the very bottom, with a reserved fixed height
   return (
-    <div className={`${bg} border border-border rounded-lg p-4 flex flex-col justify-between h-[112px]`}>
-      <span className="text-[11px] uppercase tracking-widest text-muted font-medium leading-tight">
+    <div className={`${bg} border border-border rounded-lg px-4 h-[112px] relative`}>
+      <span className="absolute top-4 left-4 right-4 text-[11px] uppercase tracking-widest text-muted font-medium">
         {card.label}
       </span>
-      <div className="flex flex-col">
+      <div className="absolute left-4 right-4 bottom-[30px]">
         {card.breakdown && card.breakdown.length > 0 ? (
           <div className="flex items-baseline gap-3 flex-wrap leading-none">
             {card.breakdown.map((item, i) => (
@@ -47,10 +52,10 @@ function Card({ card, variant }: { card: KPICard; variant?: 'cro' | 'default' })
         ) : (
           <span className={`text-2xl font-bold ${valueColor} leading-none`}>{card.value}</span>
         )}
-        {card.sub && (
-          <p className="text-[11px] text-muted mt-2 leading-tight truncate">{card.sub}</p>
-        )}
       </div>
+      <p className="absolute left-4 right-4 bottom-3 text-[11px] text-muted leading-tight truncate h-[14px]">
+        {card.sub || '\u00A0'}
+      </p>
     </div>
   );
 }
