@@ -29,6 +29,7 @@ export interface ContactRow {
   mrr_value: number;
   pe_payment_plan?: string | null;
   pe_initial_payment?: number | string | null;
+  is_guest?: boolean;
 }
 
 export interface AdSpendRow {
@@ -173,6 +174,13 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
   const completedCount = callsCompleted.length;
   const convertedCount = converted.length;
 
+  // Paid vs guest split — guests don't contribute to workshop revenue but
+  // do count in attendance / funnel metrics.
+  const paidPurchases = purchases.filter((c) => !c.is_guest).length;
+  const guestPurchases = purchases.filter((c) => c.is_guest === true).length;
+  const paidAttendees = attendees.filter((c) => !c.is_guest).length;
+  const guestAttendees = attendees.filter((c) => c.is_guest === true).length;
+
   // ── Rates ──────────────────────────────────────────────────────────
   const showRate = safeDivide(attendeeCount, purchaseCount) * 100;
   const depositRate = safeDivide(depositedCount, purchaseCount) * 100;
@@ -196,7 +204,9 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
     if (c.pe_payment_plan === 'monthly') return s + 2000;
     return s;
   }, 0);
-  const revenueCollected = purchaseCount * 97 + depositedCount * 500 + peInitialPayments;
+  // Only paid buyers contribute the $97 ticket revenue; guests are free
+  const workshopTicketRevenue = paidPurchases * 97;
+  const revenueCollected = workshopTicketRevenue + depositedCount * 500 + peInitialPayments;
 
   // 12-month LTV = annualized monthly + upfront cash from paid-in-full.
   // Both plans are $30k/year value so a paid-in-full contributes 30k to LTV
@@ -230,16 +240,23 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
       : 0;
 
   // ── Funnel Volume KPI cards ────────────────────────────────────────
+  const purchasesSub = guestPurchases > 0
+    ? `${fmtCurrencyExact(workshopTicketRevenue)} collected · ${paidPurchases} paid / ${guestPurchases} guest`
+    : `${fmtCurrencyExact(workshopTicketRevenue)} collected`;
+  const attendeesSub = guestAttendees > 0
+    ? `↑${fmtPct(showRate)} show rate · ${paidAttendees} paid / ${guestAttendees} guest`
+    : `↑${fmtPct(showRate)} show rate`;
+
   const funnelVolume = [
     {
       label: 'Workshop Purchases',
       value: fmtInt(purchaseCount),
-      sub: `${fmtCurrencyExact(purchaseCount * 97)} collected`,
+      sub: purchasesSub,
     },
     {
       label: 'Attendees Showed',
       value: fmtInt(attendeeCount),
-      sub: `↑${fmtPct(showRate)} show rate`,
+      sub: attendeesSub,
     },
     {
       label: 'Deposit Paid',
@@ -303,7 +320,7 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
   const monthlyCount = converted.filter((c) => c.pe_payment_plan === 'monthly').length;
 
   const revenueWaterfall = [
-    { label: '$97 Workshop Sales', value: fmtCurrencyExact(purchaseCount * 97) },
+    { label: `$97 Workshop Sales (${paidPurchases} paid)`, value: fmtCurrencyExact(workshopTicketRevenue) },
     { label: `$500 Deposits (${depositedCount})`, value: fmtCurrencyExact(depositedCount * 500) },
     ...(paidInFullCount > 0
       ? [{ label: `PE Paid-in-Full (${paidInFullCount})`, value: fmtCurrencyExact(paidInFullCount * 30000) }]

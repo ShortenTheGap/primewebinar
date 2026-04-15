@@ -96,6 +96,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_cohorts_zoom_webinar_id ON cohorts(zoom_we
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS pe_payment_plan TEXT;
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS pe_initial_payment NUMERIC(10,2);
 
+-- Guest tickets: free passes given to friends / partners / existing community.
+-- Counted in attendance metrics but not revenue.
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS is_guest BOOLEAN NOT NULL DEFAULT false;
+
 -- One person can buy multiple workshops. Drop the unique-ghl_contact_id
 -- constraint in favor of a composite unique on (email, workshop_cohort) so
 -- a contact gets one row per cohort they're in.

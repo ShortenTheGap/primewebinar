@@ -90,8 +90,9 @@ export async function processGhlEvent(event: string, body: Record<string, any>):
       // different cohort) gets a NEW row, preserving their previous cohort
       // funnel state intact.
       const isBuyer = event === 'contact.purchased';
-      const { email, ghl_contact_id, utm_source, utm_campaign, utm_content, utm_medium, referral_partner, workshop_cohort } = body;
+      const { email, ghl_contact_id, utm_source, utm_campaign, utm_content, utm_medium, referral_partner, workshop_cohort, is_guest } = body;
       const lcEmail = email ? String(email).toLowerCase() : null;
+      const isGuest = is_guest === true || is_guest === 'true';
 
       if (!lcEmail || !workshop_cohort) {
         console.warn('[ghl] purchased: email and workshop_cohort are both required for cohort-scoped upsert');
@@ -101,8 +102,8 @@ export async function processGhlEvent(event: string, body: Record<string, any>):
       await query(
         `INSERT INTO contacts (
            email, ghl_contact_id, lead_source, utm_campaign, utm_content,
-           utm_medium, referral_partner, workshop_cohort, is_workshop_buyer
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           utm_medium, referral_partner, workshop_cohort, is_workshop_buyer, is_guest
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (LOWER(email), workshop_cohort) DO UPDATE SET
            ghl_contact_id = COALESCE(EXCLUDED.ghl_contact_id, contacts.ghl_contact_id),
            lead_source = COALESCE(EXCLUDED.lead_source, contacts.lead_source),
@@ -110,12 +111,13 @@ export async function processGhlEvent(event: string, body: Record<string, any>):
            utm_content = COALESCE(EXCLUDED.utm_content, contacts.utm_content),
            utm_medium = COALESCE(EXCLUDED.utm_medium, contacts.utm_medium),
            referral_partner = COALESCE(EXCLUDED.referral_partner, contacts.referral_partner),
-           is_workshop_buyer = EXCLUDED.is_workshop_buyer OR contacts.is_workshop_buyer`,
+           is_workshop_buyer = EXCLUDED.is_workshop_buyer OR contacts.is_workshop_buyer,
+           is_guest = EXCLUDED.is_guest OR contacts.is_guest`,
         [
           lcEmail, ghl_contact_id || null,
           utm_source || null, utm_campaign || null, utm_content || null,
           utm_medium || null, referral_partner || null, workshop_cohort,
-          isBuyer,
+          isBuyer, isGuest,
         ],
       );
       break;
