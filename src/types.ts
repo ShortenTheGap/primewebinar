@@ -3,6 +3,10 @@ export interface KPICard {
   value: string;
   sub?: string;
   color?: string;
+  // When set, the card displays the breakdown items side-by-side instead of
+  // the single `value`. Use for metrics that have a meaningful split
+  // (e.g. paid vs guest attendees).
+  breakdown?: Array<{ label: string; value: string; color?: string }>;
 }
 
 export interface FunnelStage {

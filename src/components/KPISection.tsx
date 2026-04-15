@@ -8,25 +8,47 @@ function SectionLabel({ text }: { text: string }) {
   );
 }
 
+const COLOR_MAP: Record<string, string> = {
+  green: 'text-[#4ade80]',
+  amber: 'text-[#f59e0b]',
+  purple: 'text-[#a78bfa]',
+  teal: 'text-[#2dd4bf]',
+  red: 'text-[#f87171]',
+};
+
+function resolveColor(color?: string): string {
+  if (!color) return 'text-white';
+  return COLOR_MAP[color] || 'text-white';
+}
+
 function Card({ card, variant }: { card: KPICard; variant?: 'cro' | 'default' }) {
   const bg = variant === 'cro' ? 'bg-[#141414]' : 'bg-card';
-  const colorMap: Record<string, string> = {
-    green: 'text-[#4ade80]',
-    amber: 'text-[#f59e0b]',
-    purple: 'text-[#a78bfa]',
-    teal: 'text-[#2dd4bf]',
-  };
-  const valueColor = card.color ? colorMap[card.color] || 'text-white' : 'text-white';
+  const valueColor = resolveColor(card.color);
 
   return (
-    <div className={`${bg} border border-border rounded-lg p-4 flex flex-col justify-between min-h-[100px]`}>
-      <span className="text-[11px] uppercase tracking-widest text-muted font-medium">
+    <div className={`${bg} border border-border rounded-lg p-4 flex flex-col justify-between h-[112px]`}>
+      <span className="text-[11px] uppercase tracking-widest text-muted font-medium leading-tight">
         {card.label}
       </span>
-      <div className="mt-2">
-        <span className={`text-2xl font-bold ${valueColor}`}>{card.value}</span>
+      <div className="flex flex-col">
+        {card.breakdown && card.breakdown.length > 0 ? (
+          <div className="flex items-baseline gap-4">
+            {card.breakdown.map((item, i) => (
+              <div key={i} className="flex flex-col leading-none">
+                <span className={`text-2xl font-bold ${resolveColor(item.color)}`}>
+                  {item.value}
+                </span>
+                <span className="text-[10px] uppercase tracking-wider text-muted mt-1">
+                  {item.label}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <span className={`text-2xl font-bold ${valueColor} leading-none`}>{card.value}</span>
+        )}
         {card.sub && (
-          <p className="text-xs text-muted mt-1">{card.sub}</p>
+          <p className="text-[11px] text-muted mt-2 leading-tight truncate">{card.sub}</p>
         )}
       </div>
     </div>

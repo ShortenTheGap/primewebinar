@@ -249,11 +249,19 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
 
   // ── Funnel Volume KPI cards ────────────────────────────────────────
   // Workshop Purchases is strictly paid tickets — guests don't inflate this
-  // business metric. Attendees Showed stays total + paid/guest breakdown
-  // for operational visibility (total people in the room).
-  const attendeesSub = guestAttendees > 0
-    ? `↑${fmtPct(showRate)} show rate · ${paidAttendees} paid / ${guestAttendees} guest`
-    : `↑${fmtPct(showRate)} show rate`;
+  // business metric. Attendees Showed renders a paid/guest breakdown at
+  // equal visual weight so both numbers are prominent.
+  const attendeesCard: any = {
+    label: 'Attendees Showed',
+    value: fmtInt(attendeeCount), // fallback if no guests
+    sub: `↑${fmtPct(showRate)} show rate`,
+  };
+  if (guestAttendees > 0 || paidAttendees > 0) {
+    attendeesCard.breakdown = [
+      { label: 'Paid', value: fmtInt(paidAttendees) },
+      { label: 'Guest', value: fmtInt(guestAttendees), color: 'purple' },
+    ];
+  }
 
   const funnelVolume = [
     {
@@ -261,11 +269,7 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
       value: fmtInt(purchaseCount),
       sub: `${fmtCurrencyExact(workshopTicketRevenue)} collected`,
     },
-    {
-      label: 'Attendees Showed',
-      value: fmtInt(attendeeCount),
-      sub: attendeesSub,
-    },
+    attendeesCard,
     {
       label: 'Deposit Paid',
       value: fmtInt(depositedCount),
