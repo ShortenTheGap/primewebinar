@@ -14,6 +14,7 @@ router.get('/', async (_req: Request, res: Response) => {
     hasGhlSecret: !!process.env.GHL_WEBHOOK_SECRET,
     hasZoomSecret: !!process.env.ZOOM_WEBHOOK_SECRET,
     hasRoamSecret: !!process.env.ROAM_WEBHOOK_SECRET,
+    roamAllowedHosts: process.env.ROAM_ALLOWED_HOSTS || null,
     hasMetaToken: !!process.env.META_ACCESS_TOKEN,
     dataSource: process.env.VITE_DATA_SOURCE || 'unset',
     time: new Date().toISOString(),
