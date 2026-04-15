@@ -65,6 +65,24 @@ export async function processGhlEvent(event: string, body: Record<string, any>):
       break;
     }
 
+    case 'contact.deposit_paid': {
+      // Fires when a deposit is actually purchased (GHL Order Submitted / Product Purchased trigger).
+      // Ties the email to an existing contact and flips the deposit flag + timestamp.
+      // Safe to fire multiple times — timestamp only sets on first fire.
+      const { email, amount } = body;
+      await query(
+        `UPDATE contacts SET
+           deposit_paid = true,
+           deposit_paid_at = COALESCE(deposit_paid_at, NOW())
+         WHERE LOWER(email) = LOWER($1)`,
+        [email],
+      );
+      if (amount) {
+        console.log(`[ghl] deposit_paid for ${email} — amount ${amount}`);
+      }
+      break;
+    }
+
     case 'contact.tag_added': {
       const { email, tag } = body;
 
