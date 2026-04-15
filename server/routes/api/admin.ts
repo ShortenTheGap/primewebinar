@@ -163,9 +163,8 @@ router.post('/import-ghl-export', async (req: Request, res: Response) => {
            email, ghl_contact_id, workshop_cohort, lead_source,
            is_workshop_buyer
          ) VALUES ($1, $2, $3, $4, true)
-         ON CONFLICT (ghl_contact_id) DO UPDATE SET
-           email = EXCLUDED.email,
-           workshop_cohort = COALESCE(EXCLUDED.workshop_cohort, contacts.workshop_cohort),
+         ON CONFLICT (LOWER(email), workshop_cohort) DO UPDATE SET
+           ghl_contact_id = COALESCE(EXCLUDED.ghl_contact_id, contacts.ghl_contact_id),
            lead_source = COALESCE(EXCLUDED.lead_source, contacts.lead_source),
            is_workshop_buyer = true
          RETURNING (xmax = 0) AS inserted`,
@@ -249,9 +248,8 @@ router.post('/import-contacts', async (req: Request, res: Response) => {
            $1, $2, $3, $4, $5, $6, $7, $8,
            $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
          )
-         ON CONFLICT (ghl_contact_id) DO UPDATE SET
-           email = EXCLUDED.email,
-           workshop_cohort = COALESCE(EXCLUDED.workshop_cohort, contacts.workshop_cohort),
+         ON CONFLICT (LOWER(email), workshop_cohort) DO UPDATE SET
+           ghl_contact_id = COALESCE(EXCLUDED.ghl_contact_id, contacts.ghl_contact_id),
            lead_source = COALESCE(EXCLUDED.lead_source, contacts.lead_source),
            referral_partner = COALESCE(EXCLUDED.referral_partner, contacts.referral_partner),
            is_workshop_buyer = EXCLUDED.is_workshop_buyer OR contacts.is_workshop_buyer,

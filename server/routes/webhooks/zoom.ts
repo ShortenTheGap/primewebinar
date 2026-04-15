@@ -119,10 +119,13 @@ export async function processParticipantLeft(payload: Record<string, any>): Prom
     [webinarId, email, joinTime, leaveTime, durationMinutes, workshopCohort],
   );
 
-  // Match to contacts by email (case-insensitive)
+  // Match to the contact row for THIS cohort (so a multi-cohort buyer gets
+  // attendance recorded only against the workshop they actually attended).
   const result = await query(
-    `SELECT id FROM contacts WHERE LOWER(email) = $1 LIMIT 1`,
-    [email],
+    `SELECT id FROM contacts
+     WHERE LOWER(email) = $1 AND workshop_cohort = $2::date
+     LIMIT 1`,
+    [email, workshopCohort],
   );
   const contact = result.rows[0];
 

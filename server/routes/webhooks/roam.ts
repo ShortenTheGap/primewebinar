@@ -302,47 +302,47 @@ async function processRoamEvent(eventType: string, body: any): Promise<void> {
   console.log(`[roam-webhook] unhandled event type: ${eventType} — ignoring`);
 }
 
+// Pick the most recent buyer-cohort row for this email. ro.am bookings
+// usually relate to the workshop the contact most recently attended/bought.
+async function findRecentBuyerRow(email: string): Promise<{ id: string; workshop_cohort: string } | null> {
+  const result = await query(
+    `SELECT id, workshop_cohort FROM contacts
+     WHERE LOWER(email) = $1 AND is_workshop_buyer = true
+     ORDER BY workshop_cohort DESC NULLS LAST
+     LIMIT 1`,
+    [email],
+  );
+  return result.rows[0] || null;
+}
+
 async function handleBooked(body: any): Promise<void> {
   const email = extractEmail(body);
-  const cohort = extractCohort(body);
   const hostIds = extractHostIdentifiers(body);
 
   if (!email) {
     console.warn('[roam-webhook] booked: no email found in payload');
     return;
   }
-
   if (!isAllowedHost(hostIds)) {
-    console.log(
-      `[roam-webhook] booked SKIPPED — host not in allowlist. hosts=${JSON.stringify(hostIds)}`,
-    );
+    console.log(`[roam-webhook] booked SKIPPED — host not in allowlist. hosts=${JSON.stringify(hostIds)}`);
     return;
   }
 
-  const existing = await query(
-    `SELECT id, is_workshop_buyer FROM contacts WHERE LOWER(email) = $1`,
-    [email],
-  );
-  if (existing.rowCount === 0) {
-    console.log(`[roam-webhook] booked SKIPPED — no matching contact: ${email}`);
-    return;
-  }
-  if (!existing.rows[0].is_workshop_buyer) {
-    console.log(`[roam-webhook] booked SKIPPED — not a workshop buyer: ${email}`);
+  const target = await findRecentBuyerRow(email);
+  if (!target) {
+    console.log(`[roam-webhook] booked SKIPPED — no buyer row for ${email}`);
     return;
   }
 
-  const result = await query(
+  await query(
     `UPDATE contacts SET
        call_booked = true,
-       call_booked_at = COALESCE(call_booked_at, NOW()),
-       workshop_cohort = COALESCE($2::date, workshop_cohort)
-     WHERE LOWER(email) = $1
-     RETURNING id, workshop_cohort`,
-    [email, cohort || null],
+       call_booked_at = COALESCE(call_booked_at, NOW())
+     WHERE id = $1`,
+    [target.id],
   );
 
-  console.log(`[roam-webhook] marked call_booked for ${email} → cohort=${result.rows[0]?.workshop_cohort}`);
+  console.log(`[roam-webhook] marked call_booked for ${email} → cohort=${target.workshop_cohort}`);
 }
 
 async function handleCallEnded(body: any): Promise<void> {
@@ -359,35 +359,25 @@ async function handleCallEnded(body: any): Promise<void> {
     return;
   }
 
-  const existing = await query(
-    `SELECT id, is_workshop_buyer FROM contacts WHERE LOWER(email) = $1`,
-    [email],
-  );
-  if (existing.rowCount === 0) {
-    console.log(`[roam-webhook] call_ended SKIPPED — no matching contact: ${email}`);
-    return;
-  }
-  if (!existing.rows[0].is_workshop_buyer) {
-    console.log(`[roam-webhook] call_ended SKIPPED — not a workshop buyer: ${email}`);
+  const target = await findRecentBuyerRow(email);
+  if (!target) {
+    console.log(`[roam-webhook] call_ended SKIPPED — no buyer row for ${email}`);
     return;
   }
 
-  // Use duration as a proxy for "actually showed up". Under 5 minutes = likely a
-  // no-show (joined briefly or call never really happened). Over 5 min = real call.
   const noShowThreshold = Number(process.env.ROAM_NOSHOW_THRESHOLD_MINUTES || 5);
   const showed = durationMinutes === null || durationMinutes >= noShowThreshold;
 
   if (!showed) {
-    // Mark completed=true but disposition=no_show to feed the funnel correctly
     await query(
       `UPDATE contacts SET
          call_completed = true,
          call_completed_at = COALESCE(call_completed_at, NOW()),
          call_disposition = COALESCE(call_disposition, 'no_show')
-       WHERE LOWER(email) = $1`,
-      [email],
+       WHERE id = $1`,
+      [target.id],
     );
-    console.log(`[roam-webhook] marked call_completed=true, disposition=no_show for ${email} (${durationMinutes} min < ${noShowThreshold})`);
+    console.log(`[roam-webhook] marked no_show for ${email} → cohort=${target.workshop_cohort} (${durationMinutes} min < ${noShowThreshold})`);
     return;
   }
 
@@ -395,10 +385,10 @@ async function handleCallEnded(body: any): Promise<void> {
     `UPDATE contacts SET
        call_completed = true,
        call_completed_at = COALESCE(call_completed_at, NOW())
-     WHERE LOWER(email) = $1`,
-    [email],
+     WHERE id = $1`,
+    [target.id],
   );
-  console.log(`[roam-webhook] marked call_completed for ${email} (${durationMinutes ?? 'unknown'} min)`);
+  console.log(`[roam-webhook] marked call_completed for ${email} → cohort=${target.workshop_cohort} (${durationMinutes ?? 'unknown'} min)`);
 }
 
 function extractDurationMinutes(body: any): number | null {

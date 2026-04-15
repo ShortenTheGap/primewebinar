@@ -89,3 +89,12 @@ ALTER TABLE contacts ADD COLUMN IF NOT EXISTS attended_full_session BOOLEAN NOT 
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS attended_minutes INTEGER;
 ALTER TABLE cohorts ADD COLUMN IF NOT EXISTS zoom_webinar_id TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_cohorts_zoom_webinar_id ON cohorts(zoom_webinar_id) WHERE zoom_webinar_id IS NOT NULL;
+
+-- One person can buy multiple workshops. Drop the unique-email/unique-ghl_contact_id
+-- constraints in favor of a composite unique on (email, workshop_cohort) so a contact
+-- gets one row per cohort they're in.
+ALTER TABLE contacts DROP CONSTRAINT IF EXISTS contacts_ghl_contact_id_key;
+DROP INDEX IF EXISTS contacts_ghl_contact_id_key;
+CREATE UNIQUE INDEX IF NOT EXISTS contacts_email_cohort_unique
+  ON contacts (LOWER(email), workshop_cohort)
+  WHERE email IS NOT NULL AND workshop_cohort IS NOT NULL;
