@@ -738,10 +738,15 @@ router.post('/contacts/update', async (req: Request, res: Response) => {
 
     const allowed = new Set([
       'workshop_cohort', 'lead_source', 'referral_partner',
-      'is_workshop_buyer', 'attended_workshop', 'attended_full_session', 'attended_minutes',
-      'deposit_paid', 'deposit_refunded',
-      'call_booked', 'call_completed', 'call_disposition',
-      'converted_to_pe', 'assigned_rep', 'mrr_value',
+      'is_workshop_buyer', 'is_guest',
+      'attended_workshop', 'attended_full_session', 'attended_minutes',
+      'deposit_paid', 'deposit_paid_at', 'deposit_refunded',
+      'call_booked', 'call_booked_at',
+      'call_completed', 'call_completed_at',
+      'call_disposition',
+      'converted_to_pe', 'converted_at',
+      'assigned_rep', 'mrr_value',
+      'pe_payment_plan', 'pe_initial_payment',
     ]);
 
     const sets: string[] = [];
