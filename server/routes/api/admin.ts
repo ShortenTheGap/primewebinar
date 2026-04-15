@@ -630,10 +630,115 @@ router.post('/simulate-ghl', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Body must be { event, body }' });
       return;
     }
+
+    // Snapshot contact state BEFORE so we can show what changed
+    const lookupQuery = body.email
+      ? `SELECT email, ghl_contact_id, workshop_cohort, is_workshop_buyer,
+                attended_workshop, deposit_paid, call_booked, call_completed,
+                call_disposition, converted_to_pe, mrr_value
+         FROM contacts WHERE LOWER(email) = LOWER($1) LIMIT 1`
+      : `SELECT email, ghl_contact_id, workshop_cohort, is_workshop_buyer,
+                attended_workshop, deposit_paid, call_booked, call_completed,
+                call_disposition, converted_to_pe, mrr_value
+         FROM contacts WHERE ghl_contact_id = $1 LIMIT 1`;
+    const lookupParam = body.email || body.ghl_contact_id;
+
+    const before = lookupParam ? (await query(lookupQuery, [lookupParam])).rows[0] || null : null;
+
     await processGhlEvent(event, body);
-    res.json({ ok: true, event, body });
+
+    const after = lookupParam ? (await query(lookupQuery, [lookupParam])).rows[0] || null : null;
+
+    const matched = !!after;
+    const changed = matched && JSON.stringify(before) !== JSON.stringify(after);
+
+    res.json({
+      ok: true,
+      event,
+      body,
+      matched,
+      changed,
+      contactExisted: !!before,
+      contact: after,
+      note: !matched
+        ? `No contact in DB matched email=${body.email} or ghl_contact_id=${body.ghl_contact_id}. The event was processed but updated 0 rows.`
+        : changed
+          ? 'Contact found and state updated.'
+          : 'Contact found but no fields changed (already in target state, or event applied no-op).',
+    });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || 'Simulate failed' });
+  }
+});
+
+/**
+ * POST /api/admin/contacts/update
+ * Surgical update of a single contact's fields. Use for cleanup —
+ * e.g. unset attended_workshop on a contact that was wrongly flagged.
+ *
+ * Body: { email | ghl_contact_id, set: { field: value, ... } }
+ *
+ * Whitelisted fields: workshop_cohort, lead_source, referral_partner,
+ *   is_workshop_buyer, attended_workshop, attended_full_session,
+ *   attended_minutes, deposit_paid, deposit_refunded, call_booked,
+ *   call_completed, call_disposition, converted_to_pe, assigned_rep, mrr_value
+ *
+ * Setting any *_at field to NULL also clears the timestamp; setting a flag
+ * to false clears its corresponding timestamp automatically.
+ */
+router.post('/contacts/update', async (req: Request, res: Response) => {
+  try {
+    const { email, ghl_contact_id, set } = req.body || {};
+    if (!email && !ghl_contact_id) {
+      res.status(400).json({ error: 'Provide email or ghl_contact_id' });
+      return;
+    }
+    if (!set || typeof set !== 'object') {
+      res.status(400).json({ error: 'Provide a "set" object with fields to update' });
+      return;
+    }
+
+    const allowed = new Set([
+      'workshop_cohort', 'lead_source', 'referral_partner',
+      'is_workshop_buyer', 'attended_workshop', 'attended_full_session', 'attended_minutes',
+      'deposit_paid', 'deposit_refunded',
+      'call_booked', 'call_completed', 'call_disposition',
+      'converted_to_pe', 'assigned_rep', 'mrr_value',
+    ]);
+
+    const sets: string[] = [];
+    const params: any[] = [];
+    let i = 1;
+    for (const [field, value] of Object.entries(set)) {
+      if (!allowed.has(field)) continue;
+      sets.push(`${field} = $${i++}`);
+      params.push(value);
+      // Auto-clear corresponding *_at timestamp when its boolean flips false
+      if (value === false) {
+        const tsField = `${field}_at`;
+        sets.push(`${tsField} = NULL`);
+      }
+    }
+    if (sets.length === 0) {
+      res.status(400).json({ error: 'No valid fields in set object (or all values omitted)' });
+      return;
+    }
+
+    const whereClause = email ? `LOWER(email) = LOWER($${i})` : `ghl_contact_id = $${i}`;
+    params.push(email || ghl_contact_id);
+
+    const result = await query(
+      `UPDATE contacts SET ${sets.join(', ')} WHERE ${whereClause} RETURNING *`,
+      params,
+    );
+
+    res.json({
+      ok: true,
+      updatedRows: result.rowCount,
+      contact: result.rows[0] || null,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Update failed' });
   }
 });
 
