@@ -105,6 +105,7 @@ ALTER TABLE contacts ADD COLUMN IF NOT EXISTS is_guest BOOLEAN NOT NULL DEFAULT 
 -- toward its ROAS / Cost-per-Buy / etc.
 ALTER TABLE cohorts ADD COLUMN IF NOT EXISTS ad_campaign_ids TEXT[] NOT NULL DEFAULT '{}';
 ALTER TABLE cohorts ADD COLUMN IF NOT EXISTS ad_attribution_start DATE;
+ALTER TABLE cohorts ADD COLUMN IF NOT EXISTS include_all_ad_spend BOOLEAN NOT NULL DEFAULT false;
 
 -- One person can buy multiple workshops. Drop the unique-ghl_contact_id
 -- constraint in favor of a composite unique on (email, workshop_cohort) so

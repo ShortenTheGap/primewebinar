@@ -32,7 +32,7 @@ router.get('/cohorts', async (_req: Request, res: Response) => {
   try {
     const result = await query(
       `SELECT id, workshop_date, label, is_active, zoom_webinar_id,
-              ad_campaign_ids, ad_attribution_start, created_at
+              ad_campaign_ids, ad_attribution_start, include_all_ad_spend, created_at
        FROM cohorts ORDER BY workshop_date DESC`,
     );
     res.json({ cohorts: result.rows });
@@ -84,6 +84,7 @@ router.post('/cohorts', async (req: Request, res: Response) => {
       zoom_webinar_id?: string;
       ad_campaign_ids?: string[];
       ad_attribution_start?: string | null;
+      include_all_ad_spend?: boolean;
     }> = Array.isArray(body?.cohorts) ? body.cohorts : body?.workshop_date ? [body] : [];
 
     if (items.length === 0) {
@@ -107,6 +108,8 @@ router.post('/cohorts', async (req: Request, res: Response) => {
       // undefined = keep existing DB value. null/empty array = clear it.
       const hasAdCampaigns = 'ad_campaign_ids' in item;
       const hasAdStart = 'ad_attribution_start' in item;
+      const hasIncludeAll = 'include_all_ad_spend' in item;
+      const includeAll = hasIncludeAll ? !!item.include_all_ad_spend : false;
       const adCampaigns = hasAdCampaigns
         ? (Array.isArray(item.ad_campaign_ids) ? item.ad_campaign_ids.map(String) : [])
         : null;
@@ -124,13 +127,14 @@ router.post('/cohorts', async (req: Request, res: Response) => {
       }
 
       const result = await query(
-        `INSERT INTO cohorts (workshop_date, label, zoom_webinar_id, ad_campaign_ids, ad_attribution_start)
-         VALUES ($1, $2, $3, COALESCE($4::text[], '{}'), $5::date)
+        `INSERT INTO cohorts (workshop_date, label, zoom_webinar_id, ad_campaign_ids, ad_attribution_start, include_all_ad_spend)
+         VALUES ($1, $2, $3, COALESCE($4::text[], '{}'), $5::date, COALESCE($8::boolean, false))
          ON CONFLICT (workshop_date) DO UPDATE SET
            label = EXCLUDED.label,
            zoom_webinar_id = COALESCE(EXCLUDED.zoom_webinar_id, cohorts.zoom_webinar_id),
            ad_campaign_ids = COALESCE($6::text[], cohorts.ad_campaign_ids),
-           ad_attribution_start = CASE WHEN $7::boolean THEN $5::date ELSE cohorts.ad_attribution_start END
+           ad_attribution_start = CASE WHEN $7::boolean THEN $5::date ELSE cohorts.ad_attribution_start END,
+           include_all_ad_spend = CASE WHEN $9::boolean THEN $8::boolean ELSE cohorts.include_all_ad_spend END
          RETURNING workshop_date, (xmax = 0) AS inserted`,
         [
           item.workshop_date,
@@ -138,8 +142,10 @@ router.post('/cohorts', async (req: Request, res: Response) => {
           zoomId,
           adCampaigns,
           adStart,
-          adCampaigns, // $6 — same value as $4 for the UPDATE case
-          hasAdStart,  // $7 — flag whether to override ad_attribution_start on update
+          adCampaigns,      // $6 — same value as $4 for the UPDATE case
+          hasAdStart,        // $7 — flag whether to override ad_attribution_start on update
+          hasIncludeAll ? includeAll : null, // $8 — include_all_ad_spend value (null → default false on insert)
+          hasIncludeAll,     // $9 — flag whether to override include_all_ad_spend on update
         ],
       );
       touched.push({

@@ -8,6 +8,7 @@ interface Cohort {
   zoom_webinar_id: string | null;
   ad_campaign_ids: string[] | null;
   ad_attribution_start: string | null;
+  include_all_ad_spend: boolean | null;
   created_at: string;
 }
 
@@ -75,6 +76,7 @@ export default function AdminView() {
   const [openAdsPanel, setOpenAdsPanel] = useState<string | null>(null);
   const [adEditCampaigns, setAdEditCampaigns] = useState<Set<string>>(new Set());
   const [adEditStart, setAdEditStart] = useState<string>('');
+  const [adEditIncludeAll, setAdEditIncludeAll] = useState<boolean>(false);
   const [campaignFilter, setCampaignFilter] = useState<string>('');
   const [campaignRanFrom, setCampaignRanFrom] = useState<string>('');
   const [campaignRanTo, setCampaignRanTo] = useState<string>('');
@@ -165,6 +167,7 @@ export default function AdminView() {
     setOpenAdsPanel(cohort.id);
     setAdEditCampaigns(new Set(cohort.ad_campaign_ids || []));
     setAdEditStart(cohort.ad_attribution_start || '');
+    setAdEditIncludeAll(!!cohort.include_all_ad_spend);
   }
 
   function toggleCampaign(campaignId: string) {
@@ -211,6 +214,7 @@ export default function AdminView() {
         workshop_date: cohort.workshop_date,
         ad_campaign_ids: Array.from(adEditCampaigns),
         ad_attribution_start: adEditStart || null,
+        include_all_ad_spend: adEditIncludeAll,
       });
       flashToast(`Ad attribution saved for ${cohort.workshop_date}`);
       setOpenAdsPanel(null);
@@ -467,10 +471,31 @@ export default function AdminView() {
                           </div>
                         </div>
 
-                        <div>
+                        <label className="flex items-start gap-3 p-3 border border-border rounded cursor-pointer hover:bg-[#141414]">
+                          <input
+                            type="checkbox"
+                            checked={adEditIncludeAll}
+                            onChange={(e) => setAdEditIncludeAll(e.target.checked)}
+                            className="accent-teal mt-0.5"
+                          />
+                          <div className="flex-1">
+                            <div className="text-sm">
+                              Include <strong>all</strong> ad spend in this window
+                            </div>
+                            <div className="text-[11px] text-muted mt-0.5">
+                              Ignores campaign selection below — every campaign that ran between
+                              the attribution start and workshop date counts toward ROAS, Cost Per
+                              Buy, Cost Per Close, and Ad Spend. Useful as a conservative baseline
+                              when you haven't tagged webinar-specific campaigns yet.
+                            </div>
+                          </div>
+                        </label>
+
+                        <div className={adEditIncludeAll ? 'opacity-50 pointer-events-none' : ''}>
                           <div className="flex items-center justify-between mb-2">
                             <label className="text-[10px] uppercase tracking-wider text-muted">
                               Attributed Campaigns ({adEditCampaigns.size} selected)
+                              {adEditIncludeAll && ' — disabled while "include all" is on'}
                             </label>
                             <span className="text-[11px] text-muted">
                               {(() => {

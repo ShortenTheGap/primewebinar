@@ -66,6 +66,7 @@ export interface CohortRow {
   zoom_webinar_id?: string | null;
   ad_campaign_ids?: string[] | null;
   ad_attribution_start?: string | null;
+  include_all_ad_spend?: boolean | null;
 }
 
 export interface RawData {
@@ -183,13 +184,15 @@ function filterAttributedAdSpend(
   return adSpend.filter((row) => {
     const rowDate = row.date as unknown as string; // DATE → "YYYY-MM-DD"
     return applicable.some((c) => {
-      if (!c.ad_campaign_ids || c.ad_campaign_ids.length === 0) return false;
-      if (!c.ad_campaign_ids.includes(row.campaign_id)) return false;
       const start = c.ad_attribution_start as unknown as string | null;
       const end = c.workshop_date as unknown as string;
       if (start && rowDate < start) return false;
       if (end && rowDate > end) return false;
-      return true;
+      // include_all_ad_spend=true: any campaign in the window counts.
+      // Otherwise require an explicit campaign_id match.
+      if (c.include_all_ad_spend) return true;
+      if (!c.ad_campaign_ids || c.ad_campaign_ids.length === 0) return false;
+      return c.ad_campaign_ids.includes(row.campaign_id);
     });
   });
 }
