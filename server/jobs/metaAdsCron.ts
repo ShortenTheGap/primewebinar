@@ -50,7 +50,6 @@ export async function syncMetaAdsInsights(opts?: { since?: string; until?: strin
     const fields = 'campaign_id,campaign_name,adset_id,impressions,clicks,spend,reach,date_start';
     const url = new URL(`https://graph.facebook.com/v19.0/act_${adAccountId}/insights`);
     url.searchParams.set('fields', fields);
-    url.searchParams.set('breakdowns', 'ad_id');
     url.searchParams.set('time_range', JSON.stringify({ since, until }));
     url.searchParams.set('level', 'ad');
     url.searchParams.set('time_increment', '1'); // break multi-day ranges into daily rows
