@@ -121,33 +121,49 @@ export async function processParticipantLeft(payload: Record<string, any>): Prom
 
   // Match to the contact row for THIS cohort (so a multi-cohort buyer gets
   // attendance recorded only against the workshop they actually attended).
-  const result = await query(
+  const existing = await query(
     `SELECT id FROM contacts
      WHERE LOWER(email) = $1 AND workshop_cohort = $2::date
      LIMIT 1`,
     [email, workshopCohort],
   );
-  const contact = result.rows[0];
+  const stayedFullSession = durationMinutes >= 45;
 
-  if (contact) {
-    // 45 min = stayed through meaningful portion of a 60-min session
-    const stayedFullSession = durationMinutes >= 45;
-
+  let contactId: string;
+  if (existing.rowCount && existing.rowCount > 0) {
+    contactId = existing.rows[0].id;
     await query(
       `UPDATE contacts SET
          attended_workshop = true,
          attended_full_session = $1 OR attended_full_session,
          attended_minutes = GREATEST(COALESCE(attended_minutes, 0), $2)
        WHERE id = $3`,
-      [stayedFullSession, durationMinutes, contact.id],
-    );
-    await query(
-      `UPDATE zoom_attendance SET matched_contact_id = $1 WHERE webinar_id = $2 AND email = $3`,
-      [contact.id, webinarId, email],
+      [stayedFullSession, durationMinutes, contactId],
     );
   } else {
-    console.log(`No matching contact found for Zoom participant: ${email}`);
+    // No contact in GHL for this email + cohort — they're a guest (invited
+    // directly to Zoom, bypassing the GHL funnel). Auto-create a guest
+    // contact row so attendance still counts toward the dashboard.
+    const inserted = await query(
+      `INSERT INTO contacts
+         (email, workshop_cohort, is_workshop_buyer, is_guest,
+          attended_workshop, attended_full_session, attended_minutes)
+       VALUES ($1, $2::date, true, true, true, $3, $4)
+       ON CONFLICT (LOWER(email), workshop_cohort) DO UPDATE SET
+         attended_workshop = true,
+         attended_full_session = EXCLUDED.attended_full_session OR contacts.attended_full_session,
+         attended_minutes = GREATEST(COALESCE(contacts.attended_minutes, 0), EXCLUDED.attended_minutes)
+       RETURNING id`,
+      [email, workshopCohort, stayedFullSession, durationMinutes],
+    );
+    contactId = inserted.rows[0].id;
+    console.log(`[zoom] auto-created guest contact for ${email} in cohort ${workshopCohort}`);
   }
+
+  await query(
+    `UPDATE zoom_attendance SET matched_contact_id = $1 WHERE webinar_id = $2 AND email = $3`,
+    [contactId, webinarId, email],
+  );
 }
 
 export default router;

@@ -382,8 +382,8 @@ router.post('/import-zoom-attendance', async (req: Request, res: Response) => {
     const results = {
       attendeesImported: 0,
       contactsMatched: 0,
+      guestsCreated: 0,
       contactsStayedFullSession: 0,
-      unmatched: [] as string[],
     };
 
     for (const a of attendees) {
@@ -411,33 +411,53 @@ router.post('/import-zoom-attendance', async (req: Request, res: Response) => {
       );
       results.attendeesImported++;
 
-      // Try to match to a contact
+      const stayedFull = duration >= fullSessionMinutes;
+      if (stayedFull) results.contactsStayedFullSession++;
+
+      // Match to existing contact for this cohort, or auto-create as guest
       const contactResult = await query(
-        `SELECT id FROM contacts WHERE LOWER(email) = $1 LIMIT 1`,
-        [email],
+        `SELECT id, is_guest FROM contacts
+         WHERE LOWER(email) = $1 AND workshop_cohort = $2::date
+         LIMIT 1`,
+        [email, workshop_cohort],
       );
       const contact = contactResult.rows[0];
 
+      let contactId: string;
       if (contact) {
-        const stayedFull = duration >= fullSessionMinutes;
-        if (stayedFull) results.contactsStayedFullSession++;
-
+        contactId = contact.id;
         await query(
           `UPDATE contacts SET
              attended_workshop = true,
              attended_full_session = $1 OR attended_full_session,
              attended_minutes = GREATEST(COALESCE(attended_minutes, 0), $2)
            WHERE id = $3`,
-          [stayedFull, duration, contact.id],
-        );
-        await query(
-          `UPDATE zoom_attendance SET matched_contact_id = $1 WHERE webinar_id = $2 AND email = $3`,
-          [contact.id, webinar_id, email],
+          [stayedFull, duration, contactId],
         );
         results.contactsMatched++;
       } else {
-        results.unmatched.push(email);
+        // No existing contact → treat as guest (invited to Zoom directly,
+        // not through the GHL paid-purchase funnel)
+        const inserted = await query(
+          `INSERT INTO contacts
+             (email, workshop_cohort, is_workshop_buyer, is_guest,
+              attended_workshop, attended_full_session, attended_minutes)
+           VALUES ($1, $2::date, true, true, true, $3, $4)
+           ON CONFLICT (LOWER(email), workshop_cohort) DO UPDATE SET
+             attended_workshop = true,
+             attended_full_session = EXCLUDED.attended_full_session OR contacts.attended_full_session,
+             attended_minutes = GREATEST(COALESCE(contacts.attended_minutes, 0), EXCLUDED.attended_minutes)
+           RETURNING id`,
+          [email, workshop_cohort, stayedFull, duration],
+        );
+        contactId = inserted.rows[0].id;
+        results.guestsCreated++;
       }
+
+      await query(
+        `UPDATE zoom_attendance SET matched_contact_id = $1 WHERE webinar_id = $2 AND email = $3`,
+        [contactId, webinar_id, email],
+      );
     }
 
     res.json({ ok: true, ...results });
@@ -555,12 +575,11 @@ router.post('/import-zoom-csv', async (req: Request, res: Response) => {
       return;
     }
 
-    // Now run the same logic as /import-zoom-attendance
     const results = {
       attendeesImported: 0,
       contactsMatched: 0,
+      guestsCreated: 0,
       contactsStayedFullSession: 0,
-      unmatched: [] as string[],
     };
 
     for (const a of attendees) {
@@ -577,30 +596,51 @@ router.post('/import-zoom-csv', async (req: Request, res: Response) => {
       );
       results.attendeesImported++;
 
+      const stayedFull = a.duration_minutes >= fullSessionMinutes;
+      if (stayedFull) results.contactsStayedFullSession++;
+
       const contactResult = await query(
-        `SELECT id FROM contacts WHERE LOWER(email) = $1 LIMIT 1`,
-        [a.email],
+        `SELECT id FROM contacts
+         WHERE LOWER(email) = $1 AND workshop_cohort = $2::date
+         LIMIT 1`,
+        [a.email, cohort],
       );
       const contact = contactResult.rows[0];
+
+      let contactId: string;
       if (contact) {
-        const stayedFull = a.duration_minutes >= fullSessionMinutes;
-        if (stayedFull) results.contactsStayedFullSession++;
+        contactId = contact.id;
         await query(
           `UPDATE contacts SET
              attended_workshop = true,
              attended_full_session = $1 OR attended_full_session,
              attended_minutes = GREATEST(COALESCE(attended_minutes, 0), $2)
            WHERE id = $3`,
-          [stayedFull, a.duration_minutes, contact.id],
-        );
-        await query(
-          `UPDATE zoom_attendance SET matched_contact_id = $1 WHERE webinar_id = $2 AND email = $3`,
-          [contact.id, webinarId, a.email],
+          [stayedFull, a.duration_minutes, contactId],
         );
         results.contactsMatched++;
       } else {
-        results.unmatched.push(a.email);
+        // Auto-create as guest (invited directly to Zoom, not through GHL)
+        const inserted = await query(
+          `INSERT INTO contacts
+             (email, workshop_cohort, is_workshop_buyer, is_guest,
+              attended_workshop, attended_full_session, attended_minutes)
+           VALUES ($1, $2::date, true, true, true, $3, $4)
+           ON CONFLICT (LOWER(email), workshop_cohort) DO UPDATE SET
+             attended_workshop = true,
+             attended_full_session = EXCLUDED.attended_full_session OR contacts.attended_full_session,
+             attended_minutes = GREATEST(COALESCE(contacts.attended_minutes, 0), EXCLUDED.attended_minutes)
+           RETURNING id`,
+          [a.email, cohort, stayedFull, a.duration_minutes],
+        );
+        contactId = inserted.rows[0].id;
+        results.guestsCreated++;
       }
+
+      await query(
+        `UPDATE zoom_attendance SET matched_contact_id = $1 WHERE webinar_id = $2 AND email = $3`,
+        [contactId, webinarId, a.email],
+      );
     }
 
     res.json({
