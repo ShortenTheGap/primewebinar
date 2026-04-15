@@ -50,7 +50,11 @@ function extractEmail(body: any): string | null {
 function extractHostIdentifiers(body: any): string[] {
   if (!body || typeof body !== 'object') return [];
   const ids: string[] = [];
-  const sources = [
+
+  // Gather every plausible host container — can be singular or plural, at any
+  // common nesting level
+  const containers: any[] = [];
+  const flat = [
     body.host,
     body.organizer,
     body.owner,
@@ -61,11 +65,26 @@ function extractHostIdentifiers(body: any): string[] {
     body.data?.host,
     body.payload?.host,
   ];
-  for (const s of sources) {
-    if (!s) continue;
+  const arrays = [
+    body.hosts,
+    body.organizers,
+    body.attendees,
+    body.meeting?.hosts,
+    body.booking?.hosts,
+    body.call?.hosts,
+    body.data?.hosts,
+    body.payload?.hosts,
+  ];
+
+  for (const f of flat) if (f) containers.push(f);
+  for (const arr of arrays) {
+    if (Array.isArray(arr)) for (const item of arr) containers.push(item);
+  }
+
+  for (const s of containers) {
     if (typeof s === 'string') {
       ids.push(s);
-    } else if (typeof s === 'object') {
+    } else if (typeof s === 'object' && s !== null) {
       if (typeof s.email === 'string') ids.push(s.email);
       if (typeof s.name === 'string') ids.push(s.name);
       if (typeof s.id === 'string') ids.push(s.id);
@@ -112,27 +131,60 @@ router.get('/', (_req: Request, res: Response) => {
 });
 
 router.post('/', async (req: Request, res: Response) => {
+  // Log EVERY header so we can see exactly how ro.am authenticates
   console.log('[roam-webhook] POST received', {
-    headers: {
-      contentType: req.headers['content-type'],
-      hasToken: !!req.headers['x-roam-token'],
-      hasAuthz: !!req.headers['authorization'],
-    },
+    allHeaders: req.headers,
     bodyKeys: req.body ? Object.keys(req.body) : [],
-    bodyPreview: JSON.stringify(req.body || {}).slice(0, 500),
+    bodyPreview: JSON.stringify(req.body || {}).slice(0, 1500),
   });
 
-  // Accept token via x-roam-token header OR Authorization: Bearer <token>
-  // (ro.am may use either convention)
-  const token =
-    (req.headers['x-roam-token'] as string | undefined) ||
-    (req.headers['authorization'] as string | undefined)?.replace(/^Bearer\s+/i, '');
+  // Try several common token header conventions
+  const tokenCandidates = [
+    req.headers['x-roam-token'],
+    req.headers['x-roam-signature'],
+    req.headers['x-webhook-secret'],
+    req.headers['x-webhook-token'],
+    req.headers['x-api-key'],
+    (req.headers['authorization'] as string | undefined)?.replace(/^Bearer\s+/i, ''),
+    (req.headers['authorization'] as string | undefined)?.replace(/^Basic\s+/i, ''),
+    req.headers['authorization'],
+  ];
+  const token = tokenCandidates.find((v) => typeof v === 'string' && v.length > 0) as string | undefined;
 
-  if (!verifyToken(token)) {
-    console.warn('[roam-webhook] rejected — invalid or missing token');
-    res.status(401).json({ error: 'Invalid or missing auth token' });
+  // Accept HMAC-signed requests too: if there's a signature header, verify
+  // the body signature against ROAM_WEBHOOK_SECRET
+  const rawBody = JSON.stringify(req.body || {});
+  const signatureCandidates = [
+    req.headers['x-roam-signature'],
+    req.headers['x-webhook-signature'],
+    req.headers['x-signature'],
+    req.headers['x-hub-signature-256'],
+  ].filter((v) => typeof v === 'string') as string[];
+
+  const isHmacValid = signatureCandidates.some((sig) => {
+    const secret = process.env.ROAM_WEBHOOK_SECRET || '';
+    if (!secret) return false;
+    const computed = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+    // Accept formats: "<hex>", "sha256=<hex>", "v0=<hex>"
+    const normalized = sig.replace(/^(sha256=|v0=)/i, '');
+    try {
+      return crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(normalized));
+    } catch {
+      return false;
+    }
+  });
+
+  const tokenValid = verifyToken(token);
+
+  if (!tokenValid && !isHmacValid) {
+    console.warn('[roam-webhook] rejected — no matching token or HMAC signature found');
+    console.warn('[roam-webhook] tokenCandidates checked:', tokenCandidates.map((v) => (v ? String(v).slice(0, 8) + '...' : 'none')));
+    console.warn('[roam-webhook] signatureCandidates checked:', signatureCandidates.length);
+    res.status(401).json({ error: 'Invalid or missing auth' });
     return;
   }
+
+  console.log(`[roam-webhook] auth passed via ${tokenValid ? 'token' : 'HMAC signature'}`);
 
   // Respond 200 fast so ro.am doesn't retry
   res.status(200).json({ received: true });
