@@ -56,57 +56,65 @@ export async function syncMetaAdsInsights(opts?: { since?: string; until?: strin
     url.searchParams.set('limit', '500');
     url.searchParams.set('access_token', accessToken);
 
-    const response = await fetch(url.toString());
-
-    if (!response.ok) {
-      const errorBody = await response.text();
-      console.error(`[meta-ads] API error (${response.status}):`, errorBody);
-      return {
-        ok: false,
-        dateRange: { since, until },
-        upserted: 0,
-        error: `Meta API ${response.status}: ${errorBody.slice(0, 300)}`,
-      };
-    }
-
-    const json = await response.json();
-    const insights: MetaInsight[] = json.data || [];
-
-    if (insights.length === 0) {
-      console.log(`[meta-ads] No insights returned for ${since}..${until}`);
-      return { ok: true, dateRange: { since, until }, upserted: 0 };
-    }
-
     let upserted = 0;
-    for (const row of insights) {
-      await query(
-        `INSERT INTO ad_spend (date, campaign_id, campaign_name, adset_id, creative_id, impressions, clicks, spend, reach, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
-         ON CONFLICT (date, campaign_id) DO UPDATE SET
-           campaign_name = EXCLUDED.campaign_name,
-           adset_id = EXCLUDED.adset_id,
-           creative_id = EXCLUDED.creative_id,
-           impressions = EXCLUDED.impressions,
-           clicks = EXCLUDED.clicks,
-           spend = EXCLUDED.spend,
-           reach = EXCLUDED.reach,
-           updated_at = NOW()`,
-        [
-          row.date_start,
-          row.campaign_id,
-          row.campaign_name,
-          row.adset_id,
-          row.ad_id || null,
-          parseInt(row.impressions, 10) || 0,
-          parseInt(row.clicks, 10) || 0,
-          parseFloat(row.spend) || 0,
-          parseInt(row.reach, 10) || 0,
-        ],
-      );
-      upserted++;
+    let nextUrl: string | null = url.toString();
+    let pageCount = 0;
+    const maxPages = 100; // safety stop: 100 pages × 500 rows = 50k rows per sync
+
+    while (nextUrl && pageCount < maxPages) {
+      const response: Response = await fetch(nextUrl);
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        console.error(`[meta-ads] API error (${response.status}):`, errorBody);
+        return {
+          ok: false,
+          dateRange: { since, until },
+          upserted,
+          error: `Meta API ${response.status}: ${errorBody.slice(0, 300)}`,
+        };
+      }
+
+      const json: { data?: MetaInsight[]; paging?: { next?: string } } = await response.json();
+      const insights: MetaInsight[] = json.data || [];
+
+      for (const row of insights) {
+        await query(
+          `INSERT INTO ad_spend (date, campaign_id, campaign_name, adset_id, creative_id, impressions, clicks, spend, reach, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+           ON CONFLICT (date, campaign_id) DO UPDATE SET
+             campaign_name = EXCLUDED.campaign_name,
+             adset_id = EXCLUDED.adset_id,
+             creative_id = EXCLUDED.creative_id,
+             impressions = EXCLUDED.impressions,
+             clicks = EXCLUDED.clicks,
+             spend = EXCLUDED.spend,
+             reach = EXCLUDED.reach,
+             updated_at = NOW()`,
+          [
+            row.date_start,
+            row.campaign_id,
+            row.campaign_name,
+            row.adset_id,
+            row.ad_id || null,
+            parseInt(row.impressions, 10) || 0,
+            parseInt(row.clicks, 10) || 0,
+            parseFloat(row.spend) || 0,
+            parseInt(row.reach, 10) || 0,
+          ],
+        );
+        upserted++;
+      }
+
+      nextUrl = json.paging?.next || null;
+      pageCount++;
     }
 
-    console.log(`[meta-ads] Sync complete: ${upserted} rows for ${since}..${until}`);
+    if (pageCount >= maxPages) {
+      console.warn(`[meta-ads] Hit maxPages safety limit (${maxPages}) — some data may be missing`);
+    }
+
+    console.log(`[meta-ads] Sync complete: ${upserted} rows across ${pageCount} page(s) for ${since}..${until}`);
     return { ok: true, dateRange: { since, until }, upserted };
   } catch (err: any) {
     console.error('[meta-ads] Sync failed:', err);
