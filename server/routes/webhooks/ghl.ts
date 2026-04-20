@@ -95,6 +95,48 @@ export async function resolveContactId(
   return null;
 }
 
+/**
+ * Derive a clean, human-readable lead_source label from raw UTM fields.
+ *
+ *   utm_source=facebook + utm_medium=cpc     → "FB Ad"
+ *   utm_source=facebook + utm_medium=organic  → "FB Organic"
+ *   utm_source=instagram + utm_medium=cpc     → "IG Ad"
+ *   utm_source=instagram + utm_medium=organic  → "IG Organic"
+ *   utm_source=email (any medium)             → "Email"
+ *   referral_partner set                      → "Partner"
+ *   utm_source present but unrecognized       → titlecased utm_source
+ *   nothing set                               → null → "Unknown" on dashboard
+ */
+function normalizeLeadSource(
+  utmSource: string | null | undefined,
+  utmMedium: string | null | undefined,
+  referralPartner: string | null | undefined,
+): string | null {
+  if (referralPartner) return 'Partner';
+
+  const src = (utmSource || '').toLowerCase().trim();
+  const med = (utmMedium || '').toLowerCase().trim();
+
+  if (!src) return null;
+
+  if (src === 'email' || med === 'email') return 'Email';
+
+  if (src === 'facebook' || src === 'fb') {
+    if (med === 'cpc' || med === 'paid' || med === 'ad' || med === 'ads') return 'FB Ad';
+    if (med === 'organic' || med === 'social' || med === 'post') return 'FB Organic';
+    return 'FB Ad'; // default fb to paid (safer assumption)
+  }
+
+  if (src === 'instagram' || src === 'ig') {
+    if (med === 'cpc' || med === 'paid' || med === 'ad' || med === 'ads') return 'IG Ad';
+    if (med === 'organic' || med === 'social' || med === 'post') return 'IG Organic';
+    return 'IG Ad';
+  }
+
+  // Unrecognized source — titlecase the raw value
+  return src.charAt(0).toUpperCase() + src.slice(1);
+}
+
 export async function processGhlEvent(event: string, body: Record<string, any>): Promise<void> {
   switch (event) {
     case 'contact.created':
@@ -106,6 +148,7 @@ export async function processGhlEvent(event: string, body: Record<string, any>):
       const { email, ghl_contact_id, utm_source, utm_campaign, utm_content, utm_medium, referral_partner, workshop_cohort, is_guest } = body;
       const lcEmail = email ? String(email).toLowerCase() : null;
       const isGuest = is_guest === true || is_guest === 'true';
+      const leadSource = normalizeLeadSource(utm_source, utm_medium, referral_partner);
 
       if (!lcEmail || !workshop_cohort) {
         console.warn('[ghl] purchased: email and workshop_cohort are both required for cohort-scoped upsert');
@@ -128,7 +171,7 @@ export async function processGhlEvent(event: string, body: Record<string, any>):
            is_guest = EXCLUDED.is_guest OR contacts.is_guest`,
         [
           lcEmail, ghl_contact_id || null,
-          utm_source || null, utm_campaign || null, utm_content || null,
+          leadSource, utm_campaign || null, utm_content || null,
           utm_medium || null, referral_partner || null, workshop_cohort,
           isBuyer, isGuest,
         ],
