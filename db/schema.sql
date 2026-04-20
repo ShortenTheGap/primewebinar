@@ -117,3 +117,19 @@ DROP INDEX IF EXISTS contacts_ghl_contact_id_key;
 DROP INDEX IF EXISTS contacts_email_cohort_unique;
 CREATE UNIQUE INDEX IF NOT EXISTS contacts_email_cohort_unique
   ON contacts (LOWER(email), workshop_cohort);
+
+-- Attribution columns. Raw utm_source is stored alongside the normalized
+-- lead_source so we can debug mis-normalizations and rerun attribution logic
+-- without losing the original value. First-touch columns capture the UTMs
+-- the FIRST time we see a contact in a cohort — populated only if NULL, so
+-- subsequent webhooks (e.g. a later contact.purchased) don't overwrite the
+-- original attribution. fbclid is the Meta click ID when the visitor arrived
+-- from a Facebook or Instagram ad click.
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS utm_source TEXT;
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS first_utm_source TEXT;
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS first_utm_campaign TEXT;
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS first_utm_content TEXT;
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS first_utm_medium TEXT;
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS first_lead_source TEXT;
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS first_touch_at TIMESTAMPTZ;
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS fbclid TEXT;
