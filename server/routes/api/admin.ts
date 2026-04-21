@@ -190,7 +190,7 @@ router.delete('/cohorts/:workshop_date', async (req: Request, res: Response) => 
  * Body:
  * {
  *   "workshop_cohort": "2026-04-02",     // required
- *   "lead_source": "Email Kit",           // optional — applied to all rows
+ *   "lead_source": "Email",               // optional — applied to all rows
  *   "ghlExport": {
  *     "<ghl_contact_id>": { "Email": "...", "Tags": "...", ... },
  *     ...
@@ -968,7 +968,7 @@ router.post('/seed-demo', async (req: Request, res: Response) => {
       return;
     }
 
-    const sources = ['Email Kit', 'FB Ad', 'IG Ad', 'IG Organic', 'FB Organic', 'Partner'];
+    const sources = ['Email', 'FB Ad', 'IG Ad', 'IG Organic', 'FB Organic', 'Partner'];
     const partners = [null, null, 'Krista M.', 'Joey M.', 'Sunny K.'];
     const reps = ['Rep A', 'Rep B'];
     const dispositions: Array<'sold' | 'follow_up' | 'not_a_fit' | 'no_show'> = [

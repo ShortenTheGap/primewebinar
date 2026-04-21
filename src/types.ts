@@ -85,7 +85,7 @@ export interface AdPerformance {
 export interface OrganicPerformance {
   igOrganic: number;
   fbOrganic: number;
-  emailKit: number;
+  email: number;
   emailOpenRate: number;
   clickToBuyCvr: number;
   topEmailSubject: string;

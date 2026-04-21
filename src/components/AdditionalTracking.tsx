@@ -53,7 +53,7 @@ export default function AdditionalTracking({ ad, organic, partners }: Props) {
           <div className="space-y-0.5">
             <StatRow label="IG Organic" value={String(organic.igOrganic)} />
             <StatRow label="FB Organic" value={String(organic.fbOrganic)} />
-            <StatRow label="Email Kit" value={String(organic.emailKit)} />
+            <StatRow label="Email" value={String(organic.email)} />
             <StatRow label="Email Open Rate" value={`${organic.emailOpenRate}%`} color="text-[#4ade80]" />
             <StatRow label="Click-to-Buy CVR" value={`${organic.clickToBuyCvr}%`} />
             <StatRow label="Top Email Subject" value={organic.topEmailSubject} color="text-[#a78bfa]" />

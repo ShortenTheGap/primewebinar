@@ -1,7 +1,7 @@
 import type { DashboardPayload } from '../types';
 
 const LEAD_SOURCE_COLORS: Record<string, string> = {
-  'Email Kit': '#a78bfa',
+  'Email': '#a78bfa',
   'FB Ad': '#3b82f6',
   'IG Ad': '#ec4899',
   'IG Organic': '#f472b6',
@@ -52,7 +52,7 @@ export const seedData: DashboardPayload = {
     { label: 'ROAS', value: '8.8×' },
   ],
   leadSourceChart: [
-    { name: 'Email Kit', value: 42, color: LEAD_SOURCE_COLORS['Email Kit'] },
+    { name: 'Email', value: 42, color: LEAD_SOURCE_COLORS['Email'] },
     { name: 'FB Ad', value: 39, color: LEAD_SOURCE_COLORS['FB Ad'] },
     { name: 'IG Ad', value: 35, color: LEAD_SOURCE_COLORS['IG Ad'] },
     { name: 'IG Organic', value: 31, color: LEAD_SOURCE_COLORS['IG Organic'] },
@@ -60,7 +60,7 @@ export const seedData: DashboardPayload = {
     { name: 'Partner', value: 22, color: LEAD_SOURCE_COLORS['Partner'] },
   ],
   leadSourceTable: [
-    { source: 'Email Kit', purchases: 42, deposited: 22, callsBooked: 18, closed: 8, closeRate: 44.4, revenue: 20000, quality: 'High' },
+    { source: 'Email', purchases: 42, deposited: 22, callsBooked: 18, closed: 8, closeRate: 44.4, revenue: 20000, quality: 'High' },
     { source: 'FB Ad', purchases: 39, deposited: 18, callsBooked: 15, closed: 5, closeRate: 33.3, revenue: 12500, quality: 'Mid' },
     { source: 'IG Ad', purchases: 35, deposited: 16, callsBooked: 13, closed: 4, closeRate: 30.8, revenue: 10000, quality: 'Mid' },
     { source: 'IG Organic', purchases: 31, deposited: 14, callsBooked: 12, closed: 2, closeRate: 16.7, revenue: 5000, quality: 'Low' },
@@ -87,7 +87,7 @@ export const seedData: DashboardPayload = {
     staleFollowUps: 4,
   },
   cohortTable: [
-    { workshopDate: 'Apr 12 2026', purchases: 52, attended: 41, showPct: 78.8, deposited: 26, depPct: 50.0, calls: 22, closed: 9, closePct: 40.9, mrr: 22500, topSource: 'Email Kit', showPctNorm: 1.0, closePctNorm: 1.0, mrrNorm: 1.0 },
+    { workshopDate: 'Apr 12 2026', purchases: 52, attended: 41, showPct: 78.8, deposited: 26, depPct: 50.0, calls: 22, closed: 9, closePct: 40.9, mrr: 22500, topSource: 'Email', showPctNorm: 1.0, closePctNorm: 1.0, mrrNorm: 1.0 },
     { workshopDate: 'Mar 22 2026', purchases: 48, attended: 36, showPct: 75.0, deposited: 23, depPct: 47.9, calls: 19, closed: 6, closePct: 31.6, mrr: 15000, topSource: 'FB Ad', showPctNorm: 0.6, closePctNorm: 0.5, mrrNorm: 0.56 },
     { workshopDate: 'Mar 1 2026', purchases: 45, attended: 34, showPct: 75.6, deposited: 21, depPct: 46.7, calls: 18, closed: 4, closePct: 22.2, mrr: 10000, topSource: 'IG Ad', showPctNorm: 0.65, closePctNorm: 0.2, mrrNorm: 0.33 },
     { workshopDate: 'Feb 15 2026', purchases: 42, attended: 31, showPct: 73.8, deposited: 19, depPct: 45.2, calls: 15, closed: 3, closePct: 20.0, mrr: 7500, topSource: 'Partner', showPctNorm: 0.4, closePctNorm: 0.1, mrrNorm: 0.22 },
@@ -105,7 +105,7 @@ export const seedData: DashboardPayload = {
   organicPerformance: {
     igOrganic: 31,
     fbOrganic: 18,
-    emailKit: 42,
+    email: 42,
     emailOpenRate: 44.1,
     clickToBuyCvr: 3.8,
     topEmailSubject: 'Sequence 3 Day 2',

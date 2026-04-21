@@ -128,7 +128,7 @@ function formatDate(dateStr: string): string {
 // ─── Lead-source chart colors ──────────────────────────────────────────
 
 const LEAD_SOURCE_COLORS: Record<string, string> = {
-  'Email Kit': '#a78bfa',
+  'Email': '#a78bfa',
   'FB Ad': '#3b82f6',
   'IG Ad': '#ec4899',
   'IG Organic': '#f472b6',
@@ -725,22 +725,22 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
   const fbOrganicCount = contacts.filter(
     (c) => c.lead_source === 'FB Organic' && c.is_workshop_buyer,
   ).length;
-  const emailKitCount = contacts.filter(
-    (c) => c.lead_source === 'Email Kit' && c.is_workshop_buyer,
+  const emailCount = contacts.filter(
+    (c) => c.lead_source === 'Email' && c.is_workshop_buyer,
   ).length;
 
   // Email open rate and click-to-buy CVR are derived from UTM data when available
   // Approximate: email contacts that became buyers / total email contacts
-  const emailContacts = contacts.filter((c) => c.lead_source === 'Email Kit');
+  const emailContacts = contacts.filter((c) => c.lead_source === 'Email');
   const emailBuyers = emailContacts.filter((c) => c.is_workshop_buyer);
   const emailOpenRate = emailContacts.length > 0
     ? Math.round(safeDivide(emailBuyers.length, emailContacts.length) * 1000) / 10
     : 0;
 
   // Click-to-buy CVR: approximate from total organic + email clicks to purchases
-  const organicPurchases = igOrganicCount + fbOrganicCount + emailKitCount;
+  const organicPurchases = igOrganicCount + fbOrganicCount + emailCount;
   const totalOrganicContacts = contacts.filter(
-    (c) => c.lead_source === 'IG Organic' || c.lead_source === 'FB Organic' || c.lead_source === 'Email Kit',
+    (c) => c.lead_source === 'IG Organic' || c.lead_source === 'FB Organic' || c.lead_source === 'Email',
   ).length;
   const clickToBuyCvr =
     Math.round(safeDivide(organicPurchases, totalOrganicContacts) * 1000) / 10;
@@ -776,7 +776,7 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
   const organicPerformance = {
     igOrganic: igOrganicCount,
     fbOrganic: fbOrganicCount,
-    emailKit: emailKitCount,
+    email: emailCount,
     emailOpenRate,
     clickToBuyCvr,
     topEmailSubject,

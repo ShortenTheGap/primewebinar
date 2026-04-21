@@ -57,7 +57,7 @@ export default function AutomationSpec() {
           </SpecSection>
 
           <SpecSection title="UTM Tracking (Required)">
-            <p><Chip variant="amber">utm_source</Chip> → lead_source (FB Ad, IG Ad, Email Kit, etc.)</p>
+            <p><Chip variant="amber">utm_source</Chip> → lead_source (FB Ad, IG Ad, Email, etc.)</p>
             <p><Chip variant="amber">utm_campaign</Chip> → campaign identifier</p>
             <p><Chip variant="amber">utm_content</Chip> → creative / variation</p>
             <p><Chip variant="amber">utm_medium</Chip> → channel (paid, organic, email, partner)</p>
