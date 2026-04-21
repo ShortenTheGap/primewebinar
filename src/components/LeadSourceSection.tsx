@@ -92,7 +92,9 @@ export default function LeadSourceSection({ chart, table }: Props) {
                   <td className="py-2.5 text-right">{row.closeRate.toFixed(1)}%</td>
                   <td className="py-2.5 text-right text-[#4ade80]">${row.revenue.toLocaleString()}</td>
                   <td className="py-2.5 text-center">
-                    <QualityBadge quality={row.quality} />
+                    {row.quality
+                      ? <QualityBadge quality={row.quality} />
+                      : <span className="text-muted text-xs">—</span>}
                   </td>
                 </tr>
               ))}

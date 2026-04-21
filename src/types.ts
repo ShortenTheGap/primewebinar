@@ -31,7 +31,7 @@ export interface LeadSourceRow {
   closed: number;
   closeRate: number;
   revenue: number;
-  quality: 'High' | 'Mid' | 'Low';
+  quality: 'High' | 'Mid' | 'Low' | null;
 }
 
 export interface LeadSourceChartItem {
@@ -123,4 +123,9 @@ export interface DashboardPayload {
   organicPerformance: OrganicPerformance;
   partners: PartnerRow[];
   cohorts: { value: string; label: string }[];
+  // The cohort the server actually used when building this payload. If the
+  // client requested `cohort=current`, the server resolves it to a specific
+  // workshop_date (or 'all' if there are no cohorts). The client reflects this
+  // back into its state so the dropdown shows the right label.
+  selectedCohort: string;
 }

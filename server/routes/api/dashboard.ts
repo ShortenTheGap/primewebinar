@@ -4,15 +4,42 @@ import { computeDashboardMetrics } from '../../lib/metrics.js';
 
 const router = Router();
 
+/**
+ * Resolve the `cohort=current` sentinel to a specific workshop_date.
+ *
+ *   - If any cohort's workshop_date is today or later → pick the closest upcoming one
+ *   - Else if any cohorts exist at all → pick the most recent past one
+ *   - Else → fall back to 'all'
+ *
+ * `cohorts` rows are already sorted by workshop_date DESC when passed in.
+ */
+function resolveCurrentCohort(cohorts: Array<{ workshop_date: string }>): string {
+  if (cohorts.length === 0) return 'all';
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
+  // workshop_date from pg is already a YYYY-MM-DD string (custom DATE parser in db.ts).
+  // Upcoming = workshop_date >= today. Among those, pick the earliest (closest to today).
+  const upcoming = cohorts
+    .filter((c) => c.workshop_date >= today)
+    .sort((a, b) => a.workshop_date.localeCompare(b.workshop_date));
+  if (upcoming.length > 0) return upcoming[0].workshop_date;
+  // No upcoming — pick the most recent past (cohorts[0] since rows come DESC-sorted).
+  return cohorts[0].workshop_date;
+}
+
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const cohort = (req.query.cohort as string) || 'all';
+    const requestedCohort = (req.query.cohort as string) || 'all';
     const includeAllAdSpend = req.query.includeAll === '1' || req.query.includeAll === 'true';
 
-    // Fetch cohorts
+    // Fetch cohorts (DESC by workshop_date)
     const cohortsResult = await query(
       `SELECT * FROM cohorts ORDER BY workshop_date DESC`,
     );
+
+    // Resolve the `current` sentinel now that we know the cohort list.
+    const cohort = requestedCohort === 'current'
+      ? resolveCurrentCohort(cohortsResult.rows)
+      : requestedCohort;
 
     // Fetch contacts (optionally filtered by cohort)
     const contactsResult = cohort !== 'all'

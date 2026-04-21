@@ -13,18 +13,33 @@ import AutomationSpec from './components/AutomationSpec';
 export default function App() {
   const [data, setData] = useState<DashboardPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [cohort, setCohort] = useState('all');
+  // 'current' is a sentinel the server resolves to the nearest upcoming
+  // workshop_date (or most recent past, or 'all' if no cohorts exist). On
+  // first load, the server echoes the resolved value back via
+  // payload.selectedCohort and we update local state to match.
+  const [cohort, setCohort] = useState('current');
   const [darkMode, setDarkMode] = useState(true);
   const [includeAllAdSpend, setIncludeAllAdSpend] = useState(false);
 
   useEffect(() => {
     setError(null);
+    let cancelled = false;
     getDashboardData(cohort, includeAllAdSpend)
-      .then(setData)
+      .then((payload) => {
+        if (cancelled) return;
+        setData(payload);
+        // If we asked for 'current', reflect the resolved value in the
+        // dropdown so the user sees which cohort they're viewing.
+        if (cohort === 'current' && payload.selectedCohort && payload.selectedCohort !== 'current') {
+          setCohort(payload.selectedCohort);
+        }
+      })
       .catch((err) => {
+        if (cancelled) return;
         console.error('Failed to load dashboard:', err);
         setError(err?.message || 'Failed to load dashboard data');
       });
+    return () => { cancelled = true; };
   }, [cohort, includeAllAdSpend]);
 
   useEffect(() => {

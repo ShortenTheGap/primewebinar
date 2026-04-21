@@ -116,6 +116,7 @@ export const seedData: DashboardPayload = {
     { name: 'Joey M.', purchases: 9, closed: 3, revenue: 7500 },
     { name: 'Sunny K.', purchases: 7, closed: 2, revenue: 5000 },
   ],
+  selectedCohort: 'all',
   cohorts: [
     { value: 'all', label: 'All Cohorts' },
     { value: '2026-04-12', label: 'Apr 12, 2026' },

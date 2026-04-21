@@ -458,11 +458,26 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
     }
   }
 
+  // Quality badge is only meaningful once the webinar is in the past — before
+  // then the funnel hasn't had time to play out (almost no calls booked yet,
+  // let alone converted). We show Quality only for the "all cohorts" view and
+  // for cohorts whose workshop_date is strictly before today.
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const selectedCohortRow = selectedCohort && selectedCohort !== 'all'
+    ? cohorts.find((c) => (c.workshop_date as unknown as string) === selectedCohort)
+    : null;
+  const showQuality =
+    !selectedCohort ||
+    selectedCohort === 'all' ||
+    (selectedCohortRow && (selectedCohortRow.workshop_date as unknown as string) < todayStr);
+
   const leadSourceTable = Array.from(sourceGroups.entries())
     .map(([source, g]) => {
       const cr = safeDivide(g.closed, g.callsBooked) * 100;
       const revenue = g.revenue;
-      const quality: 'High' | 'Mid' | 'Low' = cr >= 40 ? 'High' : cr >= 20 ? 'Mid' : 'Low';
+      const quality: 'High' | 'Mid' | 'Low' | null = showQuality
+        ? (cr >= 40 ? 'High' : cr >= 20 ? 'Mid' : 'Low')
+        : null;
       return {
         source,
         purchases: g.purchases,
@@ -836,5 +851,9 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
     organicPerformance,
     partners,
     cohorts: cohortOptions,
+    // Echo the cohort the server used back to the client. When the client
+    // requests `cohort=current`, this tells it which workshop_date was picked
+    // so the dropdown label can reflect the right selection.
+    selectedCohort: selectedCohort || 'all',
   };
 }
