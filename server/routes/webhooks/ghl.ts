@@ -96,40 +96,57 @@ export async function resolveContactId(
 }
 
 /**
- * Derive a clean, human-readable lead_source label from raw UTM fields.
+ * Derive a clean, human-readable lead_source label from UTM fields + Meta placement.
  *
- *   utm_source=facebook + utm_medium=cpc     → "FB Ad"
- *   utm_source=facebook + utm_medium=organic  → "FB Organic"
- *   utm_source=instagram + utm_medium=cpc     → "IG Ad"
- *   utm_source=instagram + utm_medium=organic  → "IG Organic"
- *   utm_source=email (any medium)             → "Email"
- *   referral_partner set                      → "Partner"
- *   utm_source present but unrecognized       → titlecased utm_source
- *   nothing set                               → null → "Unknown" on dashboard
+ * Meta's dynamic {{placement}} value arrives on ad clicks (e.g. `facebook_feed`,
+ * `instagram_reels`). We use it to split FB vs IG when utm_source=facebook is
+ * hardcoded across placements — a click on an IG placement still sends
+ * utm_source=facebook, but placement=instagram_* tells us the truth.
+ *
+ *   paid mediums:    cpc | paid | ad | ads
+ *   organic mediums: organic | social | post | organic_social | social_organic | unpaid_social
+ *
+ *   utm_source=facebook + placement starts with instagram_  → "IG Ad"
+ *   utm_source=facebook + organic medium                    → "FB Organic"
+ *   utm_source=facebook + (paid / empty / anything else)    → "FB Ad"
+ *   utm_source=instagram + placement starts with facebook_  → "FB Ad"
+ *   utm_source=instagram + organic medium                   → "IG Organic"
+ *   utm_source=instagram + (paid / empty / anything else)   → "IG Ad"
+ *   utm_source=email (or medium=email)                      → "Email"
+ *   referral_partner set                                    → "Partner"
+ *   utm_source present but unrecognized                     → titlecased utm_source
+ *   nothing set                                             → null → "Unknown"
  */
 function normalizeLeadSource(
   utmSource: string | null | undefined,
   utmMedium: string | null | undefined,
   referralPartner: string | null | undefined,
+  placement: string | null | undefined,
 ): string | null {
   if (referralPartner) return 'Partner';
 
   const src = (utmSource || '').toLowerCase().trim();
   const med = (utmMedium || '').toLowerCase().trim();
+  const plc = (placement || '').toLowerCase().trim();
 
   if (!src) return null;
 
   if (src === 'email' || med === 'email') return 'Email';
 
+  const paidMediums = ['cpc', 'paid', 'ad', 'ads'];
+  const organicMediums = ['organic', 'social', 'post', 'organic_social', 'social_organic', 'unpaid_social'];
+
   if (src === 'facebook' || src === 'fb') {
-    if (med === 'cpc' || med === 'paid' || med === 'ad' || med === 'ads') return 'FB Ad';
-    if (med === 'organic' || med === 'social' || med === 'post') return 'FB Organic';
+    if (plc.startsWith('instagram_')) return 'IG Ad';
+    if (organicMediums.includes(med)) return 'FB Organic';
+    if (paidMediums.includes(med)) return 'FB Ad';
     return 'FB Ad'; // default fb to paid (safer assumption)
   }
 
   if (src === 'instagram' || src === 'ig') {
-    if (med === 'cpc' || med === 'paid' || med === 'ad' || med === 'ads') return 'IG Ad';
-    if (med === 'organic' || med === 'social' || med === 'post') return 'IG Organic';
+    if (plc.startsWith('facebook_')) return 'FB Ad';
+    if (organicMediums.includes(med)) return 'IG Organic';
+    if (paidMediums.includes(med)) return 'IG Ad';
     return 'IG Ad';
   }
 
@@ -145,10 +162,15 @@ export async function processGhlEvent(event: string, body: Record<string, any>):
       // different cohort) gets a NEW row, preserving their previous cohort
       // funnel state intact.
       const isBuyer = event === 'contact.purchased';
-      const { email, ghl_contact_id, utm_source, utm_campaign, utm_content, utm_medium, referral_partner, workshop_cohort, is_guest } = body;
+      const {
+        email, ghl_contact_id,
+        utm_source, utm_campaign, utm_content, utm_medium,
+        referral_partner, workshop_cohort, is_guest,
+        fbclid, placement,
+      } = body;
       const lcEmail = email ? String(email).toLowerCase() : null;
       const isGuest = is_guest === true || is_guest === 'true';
-      const leadSource = normalizeLeadSource(utm_source, utm_medium, referral_partner);
+      const leadSource = normalizeLeadSource(utm_source, utm_medium, referral_partner, placement);
 
       if (!lcEmail || !workshop_cohort) {
         console.warn('[ghl] purchased: email and workshop_cohort are both required for cohort-scoped upsert');
@@ -157,23 +179,28 @@ export async function processGhlEvent(event: string, body: Record<string, any>):
 
       await query(
         `INSERT INTO contacts (
-           email, ghl_contact_id, lead_source, utm_campaign, utm_content,
-           utm_medium, referral_partner, workshop_cohort, is_workshop_buyer, is_guest
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           email, ghl_contact_id, lead_source, utm_source, utm_campaign, utm_content,
+           utm_medium, referral_partner, workshop_cohort, is_workshop_buyer, is_guest,
+           fbclid, placement
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          ON CONFLICT (LOWER(email), workshop_cohort) DO UPDATE SET
            ghl_contact_id = COALESCE(EXCLUDED.ghl_contact_id, contacts.ghl_contact_id),
            lead_source = COALESCE(EXCLUDED.lead_source, contacts.lead_source),
+           utm_source = COALESCE(EXCLUDED.utm_source, contacts.utm_source),
            utm_campaign = COALESCE(EXCLUDED.utm_campaign, contacts.utm_campaign),
            utm_content = COALESCE(EXCLUDED.utm_content, contacts.utm_content),
            utm_medium = COALESCE(EXCLUDED.utm_medium, contacts.utm_medium),
            referral_partner = COALESCE(EXCLUDED.referral_partner, contacts.referral_partner),
+           fbclid = COALESCE(EXCLUDED.fbclid, contacts.fbclid),
+           placement = COALESCE(EXCLUDED.placement, contacts.placement),
            is_workshop_buyer = EXCLUDED.is_workshop_buyer OR contacts.is_workshop_buyer,
            is_guest = EXCLUDED.is_guest OR contacts.is_guest`,
         [
           lcEmail, ghl_contact_id || null,
-          leadSource, utm_campaign || null, utm_content || null,
+          leadSource, utm_source || null, utm_campaign || null, utm_content || null,
           utm_medium || null, referral_partner || null, workshop_cohort,
           isBuyer, isGuest,
+          fbclid || null, placement || null,
         ],
       );
       break;
