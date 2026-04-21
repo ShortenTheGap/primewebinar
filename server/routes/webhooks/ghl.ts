@@ -46,6 +46,31 @@ function parseOccurredAt(val: unknown): string | null {
 }
 
 /**
+ * GHL merge tags (e.g. {{contact.utm_source}}) sometimes resolve to one of
+ * several "empty-like" string values instead of real null/absence:
+ *   - "" (empty string — when the field exists but has no value)
+ *   - "null" (literal string "null" — when GHL stringifies a null value)
+ *   - "undefined" (similar)
+ *   - "{{contact.xxx}}" (the literal unresolved merge tag, when the path
+ *      doesn't exist on that contact's record)
+ *   - "--" (some GHL UIs use this as the empty indicator)
+ *
+ * We coerce all of these to real null so downstream logic (normalizer,
+ * INSERT coalesce, dashboard filters) sees a consistent absence signal.
+ * Real values pass through unchanged.
+ */
+function cleanMergeField(val: unknown): string | null {
+  if (val === null || val === undefined) return null;
+  if (typeof val !== 'string') return null;
+  const trimmed = val.trim();
+  if (trimmed === '') return null;
+  const lower = trimmed.toLowerCase();
+  if (lower === 'null' || lower === 'undefined' || lower === '--') return null;
+  if (trimmed.startsWith('{{') && trimmed.endsWith('}}')) return null;
+  return trimmed;
+}
+
+/**
  * Find the right contact row to update for a per-cohort event.
  *
  * Resolution order:
@@ -162,12 +187,18 @@ export async function processGhlEvent(event: string, body: Record<string, any>):
       // different cohort) gets a NEW row, preserving their previous cohort
       // funnel state intact.
       const isBuyer = event === 'contact.purchased';
-      const {
-        email, ghl_contact_id,
-        utm_source, utm_campaign, utm_content, utm_medium,
-        referral_partner, workshop_cohort, is_guest,
-        fbclid, placement,
-      } = body;
+      const { email, ghl_contact_id, workshop_cohort, is_guest } = body;
+      // Attribution fields come from GHL merge tags which may resolve to
+      // "empty-like" strings ("null", "undefined", "--", or the literal
+      // unresolved tag). Coerce those to real null at the boundary so the
+      // normalizer and INSERT see a consistent absence signal.
+      const utm_source = cleanMergeField(body.utm_source);
+      const utm_medium = cleanMergeField(body.utm_medium);
+      const utm_campaign = cleanMergeField(body.utm_campaign);
+      const utm_content = cleanMergeField(body.utm_content);
+      const referral_partner = cleanMergeField(body.referral_partner);
+      const fbclid = cleanMergeField(body.fbclid);
+      const placement = cleanMergeField(body.placement);
       const lcEmail = email ? String(email).toLowerCase() : null;
       const isGuest = is_guest === true || is_guest === 'true';
       const leadSource = normalizeLeadSource(utm_source, utm_medium, referral_partner, placement);
