@@ -54,10 +54,14 @@ function parseOccurredAt(val: unknown): string | null {
  *   - "{{contact.xxx}}" (the literal unresolved merge tag, when the path
  *      doesn't exist on that contact's record)
  *   - "--" (some GHL UIs use this as the empty indicator)
+ *   - "none" / "(none)" (GA-convention no-value sentinel, seen in utm_medium
+ *      for direct traffic — real mediums never resolve to this)
  *
  * We coerce all of these to real null so downstream logic (normalizer,
  * INSERT coalesce, dashboard filters) sees a consistent absence signal.
- * Real values pass through unchanged.
+ * Real values pass through unchanged. Note: "direct" is NOT stripped —
+ * utm_source=direct is a meaningful GA-convention signal for direct traffic
+ * and the normalizer maps it to the "Direct" bucket.
  */
 function cleanMergeField(val: unknown): string | null {
   if (val === null || val === undefined) return null;
@@ -66,6 +70,7 @@ function cleanMergeField(val: unknown): string | null {
   if (trimmed === '') return null;
   const lower = trimmed.toLowerCase();
   if (lower === 'null' || lower === 'undefined' || lower === '--') return null;
+  if (lower === 'none' || lower === '(none)') return null;
   if (trimmed.startsWith('{{') && trimmed.endsWith('}}')) return null;
   return trimmed;
 }
@@ -138,9 +143,15 @@ export async function resolveContactId(
  *   utm_source=instagram + organic medium                   → "IG Organic"
  *   utm_source=instagram + (paid / empty / anything else)   → "IG Ad"
  *   utm_source=email (or medium=email)                      → "Email"
+ *   utm_source=direct (or "(direct)")                       → "Direct"
  *   referral_partner set                                    → "Partner"
  *   utm_source present but unrecognized                     → titlecased utm_source
  *   nothing set                                             → null → "Unknown"
+ *
+ * Note: "nothing set" stays as null/Unknown (not Direct) because we have
+ * legacy pre-attribution contacts where absent UTMs mean "we weren't
+ * capturing", not "they typed the URL". Direct requires an explicit
+ * utm_source=direct signal from the landing page / GHL.
  */
 function normalizeLeadSource(
   utmSource: string | null | undefined,
@@ -157,6 +168,8 @@ function normalizeLeadSource(
   if (!src) return null;
 
   if (src === 'email' || med === 'email') return 'Email';
+
+  if (src === 'direct' || src === '(direct)') return 'Direct';
 
   const paidMediums = ['cpc', 'paid', 'ad', 'ads'];
   const organicMediums = ['organic', 'social', 'post', 'organic_social', 'social_organic', 'unpaid_social'];
