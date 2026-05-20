@@ -29,12 +29,8 @@ router.get('/', (_req: Request, res: Response) => {
 });
 
 router.post('/', (req: Request, res: Response) => {
-  console.log('[zoom-webhook] POST received', {
-    event: req.body?.event,
-    hasPayload: !!req.body?.payload,
-    bodyKeys: req.body ? Object.keys(req.body) : [],
-    hasSecret: !!process.env.ZOOM_WEBHOOK_SECRET,
-  });
+  const incomingEvent = req.body?.event ?? '(none)';
+  console.log(`[zoom-webhook] POST received event=${incomingEvent} hasPayload=${!!req.body?.payload}`);
 
   // Handle Zoom URL validation challenge
   if (req.body?.event === 'endpoint.url_validation') {
@@ -69,7 +65,10 @@ router.post('/', (req: Request, res: Response) => {
 
   const { event, payload } = req.body;
 
-  if (event === 'webinar.participant_left') {
+  // Both Zoom Webinars and Zoom Meetings (with registration) emit the same
+  // participant_left payload shape, just under different event names. The
+  // cohorts.zoom_webinar_id column stores whichever ID is in use.
+  if (event === 'webinar.participant_left' || event === 'meeting.participant_left') {
     processParticipantLeft(payload).catch((err) => {
       console.error('Zoom webhook processing error:', err);
     });
