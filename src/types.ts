@@ -77,6 +77,7 @@ export interface AdPerformance {
   clicks: number;
   ctr: number;
   cpm: number;
+  adCvr: number;
   landingPageCvr: number;
   topCreative: string;
   topAudience: string;
@@ -87,7 +88,6 @@ export interface OrganicPerformance {
   fbOrganic: number;
   email: number;
   emailOpenRate: number;
-  clickToBuyCvr: number;
   topEmailSubject: string;
   topIgPosts: string;
 }

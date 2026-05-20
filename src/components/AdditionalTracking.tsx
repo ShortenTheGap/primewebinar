@@ -39,6 +39,7 @@ export default function AdditionalTracking({ ad, organic, partners }: Props) {
             <StatRow label="Clicks" value={ad.clicks.toLocaleString()} />
             <StatRow label="CTR" value={`${ad.ctr}%`} />
             <StatRow label="CPM" value={`$${ad.cpm.toFixed(2)}`} />
+            <StatRow label="Ad CVR" value={`${ad.adCvr}%`} />
             <StatRow label="Landing Page CVR" value={`${ad.landingPageCvr}%`} />
             <StatRow label="Top Creative" value={ad.topCreative} color="text-[#a78bfa]" />
             <StatRow label="Top Audience" value={ad.topAudience} color="text-[#a78bfa]" />
@@ -55,7 +56,6 @@ export default function AdditionalTracking({ ad, organic, partners }: Props) {
             <StatRow label="FB Organic" value={String(organic.fbOrganic)} />
             <StatRow label="Email" value={String(organic.email)} />
             <StatRow label="Email Open Rate" value={`${organic.emailOpenRate}%`} color="text-[#4ade80]" />
-            <StatRow label="Click-to-Buy CVR" value={`${organic.clickToBuyCvr}%`} />
             <StatRow label="Top Email Subject" value={organic.topEmailSubject} color="text-[#a78bfa]" />
             <StatRow label="Top IG Posts" value={organic.topIgPosts} color="text-[#a78bfa]" />
           </div>

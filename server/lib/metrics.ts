@@ -691,6 +691,13 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
   const ctr = Math.round(safeDivide(totalClicks, totalImpressions) * 1000) / 10;
   const cpm = Math.round(safeDivide(totalAdSpend, totalImpressions) * 10000) / 10;
   const landingPageCvr = Math.round(safeDivide(purchaseCount, totalClicks) * 1000) / 10;
+  // Ad CVR: only paid-traffic buyers in the numerator (FB Ad + IG Ad).
+  // Honest cost-effectiveness signal for paid Meta traffic. Meta Untagged
+  // is excluded since those clicks may be organic shares of paid ads.
+  const adBuyersCount = contacts.filter(
+    (c) => c.is_workshop_buyer && (c.lead_source === 'FB Ad' || c.lead_source === 'IG Ad'),
+  ).length;
+  const adCvr = Math.round(safeDivide(adBuyersCount, totalClicks) * 1000) / 10;
 
   // Top creative = creative_id with most spend
   const creativeSpendsMap = new Map<string, number>();
@@ -730,6 +737,7 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
     clicks: totalClicks,
     ctr,
     cpm,
+    adCvr,
     landingPageCvr,
     topCreative,
     topAudience,
@@ -746,21 +754,13 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
     (c) => c.lead_source === 'Email' && c.is_workshop_buyer,
   ).length;
 
-  // Email open rate and click-to-buy CVR are derived from UTM data when available
+  // Email open rate is derived from UTM data when available
   // Approximate: email contacts that became buyers / total email contacts
   const emailContacts = contacts.filter((c) => c.lead_source === 'Email');
   const emailBuyers = emailContacts.filter((c) => c.is_workshop_buyer);
   const emailOpenRate = emailContacts.length > 0
     ? Math.round(safeDivide(emailBuyers.length, emailContacts.length) * 1000) / 10
     : 0;
-
-  // Click-to-buy CVR: approximate from total organic + email clicks to purchases
-  const organicPurchases = igOrganicCount + fbOrganicCount + emailCount;
-  const totalOrganicContacts = contacts.filter(
-    (c) => c.lead_source === 'IG Organic' || c.lead_source === 'FB Organic' || c.lead_source === 'Email',
-  ).length;
-  const clickToBuyCvr =
-    Math.round(safeDivide(organicPurchases, totalOrganicContacts) * 1000) / 10;
 
   // Top email subject and IG posts from utm_content (best effort)
   const emailContentCounts = new Map<string, number>();
@@ -795,7 +795,6 @@ export function computeDashboardMetrics(data: RawData): DashboardPayload {
     fbOrganic: fbOrganicCount,
     email: emailCount,
     emailOpenRate,
-    clickToBuyCvr,
     topEmailSubject,
     topIgPosts,
   };
