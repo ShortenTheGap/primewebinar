@@ -16,8 +16,12 @@ function verifyGhlToken(provided: string | undefined): boolean {
 
 router.post('/', (req: Request, res: Response) => {
   const token = req.headers['x-ghl-token'] as string | undefined;
+  const tokenOk = verifyGhlToken(token);
+  const incomingEvent = req.body?.event ?? '(none)';
+  const bodyKeys = req.body?.body ? Object.keys(req.body.body) : [];
+  console.log(`[ghl-webhook] POST received event=${incomingEvent} tokenOk=${tokenOk} bodyKeys=${bodyKeys.join(',')}`);
 
-  if (!verifyGhlToken(token)) {
+  if (!tokenOk) {
     res.status(401).json({ error: 'Invalid or missing x-ghl-token header' });
     return;
   }
