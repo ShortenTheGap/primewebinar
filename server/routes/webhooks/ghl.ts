@@ -145,19 +145,23 @@ export async function resolveContactId(
  *   utm_source=email (or medium=email)                      → "Email"
  *   utm_source=direct (or "(direct)")                       → "Direct"
  *   referral_partner set                                    → "Partner"
+ *   no utm_source but fbclid present                        → "Meta Untagged"
  *   utm_source present but unrecognized                     → titlecased utm_source
  *   nothing set                                             → null → "Unknown"
  *
  * Note: "nothing set" stays as null/Unknown (not Direct) because we have
  * legacy pre-attribution contacts where absent UTMs mean "we weren't
  * capturing", not "they typed the URL". Direct requires an explicit
- * utm_source=direct signal from the landing page / GHL.
+ * utm_source=direct signal from the landing page / GHL. "Meta Untagged"
+ * captures clicks from FB/IG via links that lack UTMs but where Meta
+ * auto-appends fbclid (DMs, comments, old bio links, third-party shares).
  */
 function normalizeLeadSource(
   utmSource: string | null | undefined,
   utmMedium: string | null | undefined,
   referralPartner: string | null | undefined,
   placement: string | null | undefined,
+  fbclid: string | null | undefined,
 ): string | null {
   if (referralPartner) return 'Partner';
 
@@ -165,7 +169,10 @@ function normalizeLeadSource(
   const med = (utmMedium || '').toLowerCase().trim();
   const plc = (placement || '').toLowerCase().trim();
 
-  if (!src) return null;
+  if (!src) {
+    if (fbclid && fbclid.trim()) return 'Meta Untagged';
+    return null;
+  }
 
   if (src === 'email' || med === 'email') return 'Email';
 
@@ -214,7 +221,7 @@ export async function processGhlEvent(event: string, body: Record<string, any>):
       const placement = cleanMergeField(body.placement);
       const lcEmail = email ? String(email).toLowerCase() : null;
       const isGuest = is_guest === true || is_guest === 'true';
-      const leadSource = normalizeLeadSource(utm_source, utm_medium, referral_partner, placement);
+      const leadSource = normalizeLeadSource(utm_source, utm_medium, referral_partner, placement, fbclid);
 
       if (!lcEmail || !workshop_cohort) {
         console.warn('[ghl] purchased: email and workshop_cohort are both required for cohort-scoped upsert');

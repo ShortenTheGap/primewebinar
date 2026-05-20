@@ -134,6 +134,8 @@ const LEAD_SOURCE_COLORS: Record<string, string> = {
   'IG Organic': '#f472b6',
   'FB Organic': '#60a5fa',
   'Partner': '#2dd4bf',
+  'Direct': '#94a3b8',
+  'Meta Untagged': '#818cf8',
 };
 
 const DEFAULT_SOURCE_COLOR = '#94a3b8';
